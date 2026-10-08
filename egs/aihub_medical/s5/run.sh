@@ -2,22 +2,24 @@
 # Copyright 2026  Kolopen
 # Apache 2.0
 #
-# AI-Hub '의료진 및 환자 음성'으로 한국어 음성인식 GMM 모델을 학습한다.
-# GPU 없이 Mac(M4, 16GB)에서 끝까지 돈다. 신경망 단계는 이 결과를 보고 붙인다.
+# AI-Hub '의료진 및 환자 음성'으로 한국어 음성인식 모델을 학습한다.
+# 0~9 단계(GMM)는 CPU 로, 10 단계(신경망)는 NVIDIA GPU 로 돈다.
+# Windows 는 WSL2 안에서 돌린다(README 참고).
 #
-#   ./run.sh --train-labels /Volumes/SSD/aihub/train/labels \
-#            --train-audio  /Volumes/SSD/aihub/train/audio \
-#            --test-labels  /Volumes/SSD/aihub/valid/labels \
-#            --test-audio   /Volumes/SSD/aihub/valid/audio \
+#   ./run.sh --train-labels ~/aihub/train/labels \
+#            --train-audio  ~/aihub/train/audio \
+#            --test-labels  ~/aihub/valid/labels \
+#            --test-audio   ~/aihub/valid/audio \
 #            --terms ~/-AI/src/voice_ai/data/terms
 #
 # 중간에 멈췄으면 --stage N 으로 그 단계부터 다시 시작한다.
 #
 #   0 데이터 폴더   1 조각 나누기   2 발음사전   3 언어모델   4 특징 추출
 #   5 mono   6 tri1   7 tri2 (LDA+MLLT)   8 tri3 (SAT)   9 tri3 평가
+#   10 신경망 (local/chain/run_tdnn.sh, GPU)
 
 stage=0
-nj=6                # M4 성능 코어 수에 맞춤. 메모리가 모자라면 줄인다.
+nj=6                # 동시에 돌릴 CPU 작업 수. 메모리가 모자라면 줄인다.
 train_labels=
 train_audio=
 test_labels=
@@ -25,12 +27,15 @@ test_audio=
 terms=              # -AI 의 data/terms 폴더. 비워 두면 용어 없이 간다.
 test_utts=3000      # 평가에 쓸 발화 수. 전부 쓰면 디코딩이 오래 걸린다.
 decode_all=false    # true 면 mono/tri1/tri2 도 하나하나 평가한다.
+chain=true          # false 면 tri3 에서 멈춘다.
 
 . ./cmd.sh
 . ./path.sh
 . utils/parse_options.sh
 
 set -euo pipefail
+
+local/check_locale.sh
 
 if [ $stage -le 0 ]; then
   for v in train_labels train_audio test_labels test_audio; do
@@ -147,4 +152,13 @@ if [ $stage -le 9 ]; then
   echo "best_cer 가 글자 오류율이다. 한국어는 이쪽으로 비교한다."
   echo "주의: 이 데이터는 같은 문장을 여러 사람이 읽은 낭독체라, 평가 문장이 학습에도"
   echo "      있을 수 있다. 실제 진료 녹음에서의 성능은 따로 재야 한다(README 참고)."
+fi
+
+if [ $stage -le 10 ] && $chain; then
+  if ! cuda-compiled; then
+    echo "$0: Kaldi 가 CUDA 없이 빌드돼서 신경망 단계는 건너뜁니다."
+    echo "     GPU 컴퓨터에서 'local/chain/run_tdnn.sh' 를 따로 돌리세요."
+    exit 0
+  fi
+  local/chain/run_tdnn.sh --nj $nj
 fi

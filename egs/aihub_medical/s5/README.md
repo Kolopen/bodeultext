@@ -1,8 +1,8 @@
-# AI-Hub 의료진 및 환자 음성 → Kaldi 한국어 음성인식 (Mac)
+# AI-Hub 의료진 및 환자 음성 → Kaldi 한국어 음성인식
 
 AI-Hub **「의료진 및 환자 음성」** 데이터로 한국어 음성인식 모델을 학습하는 레시피다.
-GPU 없이 **Mac(M4, 16GB)** 에서 GMM 모델까지 끝까지 돈다. 신경망 단계는 이 결과를
-보고 붙인다.
+**Windows + NVIDIA GPU(RTX 5070)** 에서 WSL2 로 돌리는 것을 기준으로 적었다.
+GMM 단계까지는 GPU 없이도 돌므로 Mac 에서도 된다(맨 아래).
 
 ```
 라벨(JSON) + 음성(wav, 48kHz)
@@ -13,7 +13,10 @@ data/train, data/test
    │ local/prepare_dict.py       한글 표기에서 발음사전 (받침 대표음, 연음)
    │ local/train_lm.sh           3-gram 언어모델 (+ -AI 의료 용어)
    ▼
-mono -> tri1 -> tri2 (LDA+MLLT) -> tri3 (SAT)  ->  평가 (WER, CER)
+[CPU] mono -> tri1 -> tri2 -> tri3          run.sh 0~9 단계
+[GPU] TDNN-F 신경망 (chain)                  run.sh 10 단계 = local/chain/run_tdnn.sh
+   ▼
+exp/chain/tdnn1a_online/  실제 녹음 인식에 쓰는 모델 묶음
 ```
 
 ## 왜 Whisper 대신 Kaldi 인가
@@ -24,49 +27,110 @@ mono -> tri1 -> tri2 (LDA+MLLT) -> tri3 (SAT)  ->  평가 (WER, CER)
 발음사전과 언어모델에 직접 넣는다.
 
 숫자는 Kaldi 도 "이백 십 육"처럼 **소리 그대로 한글로** 낸다. 학습 데이터가 소리를
-적었기 때문이다. 이건 정해진 규칙으로 216 으로 되돌릴 수 있으므로(후처리) 빠뜨리거나
+적었기 때문이다. 정해진 규칙으로 216 으로 되돌릴 수 있으므로(후처리) 빠뜨리거나
 지어내는 것보다 다루기 쉽다.
 
-## 1. Mac 준비 (한 번만)
+---
 
-```bash
-xcode-select --install
-# Homebrew: https://brew.sh
-brew install automake autoconf libtool sox wget cmake python git bash \
-             coreutils gnu-sed gawk grep findutils unar
-pip3 install morfessor
+## 1. WSL2 준비 (Windows, 한 번만)
+
+WSL2 는 Windows 안에 리눅스를 하나 더 띄운다. 기존 파일·프로그램은 건드리지 않고,
+다 쓰면 명령 하나로 통째로 지운다(맨 아래 "다 쓰고 지우기").
+
+**① NVIDIA 드라이버를 최신으로.** 평소 쓰는 Windows 드라이버(GeForce Experience /
+NVIDIA 앱)를 업데이트만 하면 된다. WSL 은 이 드라이버를 그대로 쓴다. Windows 쪽에
+CUDA 를 따로 깔지 않는다.
+
+**② 외장 SSD 를 NTFS 로 포맷**(1TB 이상 권장). 리눅스 전체를 여기에 둬서 노트북
+디스크를 쓰지 않는다. exFAT 은 안 된다.
+
+**③ Ubuntu 설치 후 외장 SSD 로 옮기기** — 관리자 PowerShell (외장 SSD 가 `D:` 일 때)
+
+```powershell
+wsl --install -d Ubuntu-24.04          # 끝나면 재부팅, 사용자 이름/암호 만들기
+
+wsl --shutdown
+mkdir D:\wsl
+wsl --export Ubuntu-24.04 D:\wsl\ubuntu.tar
+wsl --unregister Ubuntu-24.04
+wsl --import Ubuntu-24.04 D:\wsl\ubuntu D:\wsl\ubuntu.tar
+del D:\wsl\ubuntu.tar
 ```
 
-macOS 기본 `sed`, `sort` 등은 Kaldi 스크립트와 동작이 달라서 GNU 판을 같이 깐다.
-`path.sh` 가 알아서 앞에 둔다.
-
-**외장 SSD(1TB 이상)를 APFS 로 포맷**해서 데이터와 학습 결과를 둔다. exFAT 은
-Kaldi 가 쓰는 심볼릭 링크를 못 만들어 안 된다.
-
-## 2. Kaldi 빌드 (한 번만, 1시간 안팎)
+옮기고 나면 root 로 로그인된다. Ubuntu 안에서 원래 사용자로 바꿔 둔다.
 
 ```bash
-git clone https://github.com/Kolopen/bodeultext.git ~/bodeultext
+sudo tee /etc/wsl.conf <<'EOF'
+[user]
+default=<처음 만든 사용자 이름>
+EOF
+```
+
+**④ 메모리 한도.** WSL 은 기본으로 RAM 의 절반만 쓴다. `C:\Users\<이름>\.wslconfig`
+파일을 만들어 늘린다(RAM 16GB 면 12GB, 32GB 면 24GB 정도).
+
+```ini
+[wsl2]
+memory=12GB
+```
+
+PowerShell 에서 `wsl --shutdown` 후 Ubuntu 를 다시 열면 적용된다.
+
+## 2. Ubuntu 안 준비 (한 번만)
+
+여기부터는 전부 **Ubuntu 터미널**(시작 메뉴 → Ubuntu)에서 한다.
+
+```bash
+sudo apt update
+sudo apt install -y build-essential git automake autoconf libtool sox gfortran \
+  python3 python3-pip zlib1g-dev wget unzip unar subversion libopenblas-dev locales
+sudo locale-gen en_US.UTF-8                       # 이게 없으면 Kaldi 가 한글을 깨진 글자로 본다
+pip3 install --break-system-packages morfessor
+
+nvidia-smi                                        # RTX 5070 이 보이면 GPU 연결 성공
+```
+
+**CUDA 툴킷 (12.8 이상).** RTX 5070 은 최신 세대(Blackwell)라 12.8 보다 낮으면 안 된다.
+NVIDIA 의 WSL 전용 저장소에서 받는다(일반 리눅스용 드라이버는 깔지 않는다).
+
+```bash
+wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+sudo apt install -y cuda-toolkit-12-8
+/usr/local/cuda/bin/nvcc --version                # 12.8 이 나오면 된다
+```
+
+## 3. Kaldi 빌드 (한 번만, 1~2시간)
+
+```bash
+git clone -b claude/eloquent-cray-29ssw9 https://github.com/Kolopen/bodeultext.git ~/bodeultext
+git clone https://github.com/Kolopen/-AI.git ~/-AI          # 의료 용어 사전
+
 cd ~/bodeultext/tools
-extras/check_dependencies.sh     # 빠진 것이 있으면 알려준다
+extras/check_dependencies.sh          # 빠진 것이 있으면 알려준다
 make -j 8
 
 cd ../src
-./configure --shared             # Mac 은 Apple Accelerate 를 쓴다
+./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda \
+  --cuda-arch="-gencode arch=compute_120,code=sm_120"
 make depend -j 8
 make -j 8
 ```
 
+`--cuda-arch` 는 꼭 준다. Kaldi 의 기본 목록에 RTX 50 시리즈(sm_120)가 아직 없어서,
+안 주면 빌드는 되는데 학습이 GPU 에서 돌지 않는다.
+
 확인: `cd ../egs/yesno/s5 && ./run.sh` 끝에 `%WER 0.00` 이 나오면 된다.
+에러가 나면 마지막 20줄을 공유해 주면 된다.
 
-## 3. 데이터 받기
+## 4. 데이터 받기
 
-[aihubshell](https://www.aihub.or.kr/static/pdf/aihubshell_가이드.pdf) 로 받는다.
-브라우저 다운로드는 수십 GB 에서 잘 끊긴다. 명령 형식은 가이드와 `./aihubshell -help`
-기준으로 확인한다.
+[aihubshell](https://www.aihub.or.kr/static/pdf/aihubshell_가이드.pdf) 로 Ubuntu 안에서
+바로 받는다. 명령 형식은 가이드와 `./aihubshell -help` 로 확인한다.
 
 ```bash
-mkdir -p /Volumes/SSD/aihub && cd /Volumes/SSD/aihub
+mkdir -p ~/aihub && cd ~/aihub
 curl -o aihubshell https://api.aihub.or.kr/api/aihubshell.do && chmod +x aihubshell
 ./aihubshell -mode l | grep 의료진                         # datasetkey 확인
 ./aihubshell -mode d -datasetkey <번호> -filekey 48745,48759 -aihubapikey '<키>'
@@ -79,23 +143,24 @@ curl -o aihubshell https://api.aihub.or.kr/api/aihubshell.do && chmod +x aihubsh
 | 2 | 48761, 48762 | Validation 의사_1, 환자_1 | 18GB |
 | 3 | 나머지 | 결과를 보고 결정 | 약 230GB |
 
-압축은 `unar` 로 푼다. 기본 `unzip` 은 한글 파일 이름이 깨진다. **폴더 이름에 공백이
-없어야 한다**(Kaldi 가 경로를 공백으로 자른다).
-
 ```bash
-unar -o train/labels 라벨링데이터.zip
+unar -o train/labels 라벨링데이터.zip     # unzip 은 한글 파일 이름이 깨진다
 unar -o train/audio  의료진_의사_1.zip
 unar -o train/audio  환자_1.zip
+# Validation 도 같은 식으로 valid/labels, valid/audio 에
 ```
 
-## 4. 음성 받기 전에: 라벨 점검
+**폴더 이름에 공백이 없어야 한다**(Kaldi 가 경로를 공백으로 자른다). Windows 쪽
+폴더(`/mnt/c/...`)에 두면 아주 느려지므로 Ubuntu 안(`~/aihub`)에 둔다.
+
+## 5. 음성 받기 전에: 라벨 점검
 
 라벨만 받은 상태에서 돌린다. 전사에 숫자·영문·비식별화 태그가 얼마나 섞였는지,
 몇 시간이 학습에 쓰일지 알려준다. **이 출력을 공유해 주면 정규화 규칙을 맞춘다.**
 
 ```bash
 cd ~/bodeultext/egs/aihub_medical/s5
-python3 local/aihub.py inspect --labels /Volumes/SSD/aihub/train/labels
+python3 local/aihub.py inspect --labels ~/aihub/train/labels
 ```
 
 지금 규칙은 이렇다(`local/aihub.py` 의 `normalize`).
@@ -105,34 +170,43 @@ python3 local/aihub.py inspect --labels /Volumes/SSD/aihub/train/labels
 - 비식별화 태그(`#@이름#`)가 있는 발화는 뺀다. 음성에는 실제 이름이 있어 글자와 어긋난다.
 - 아라비아 숫자나 영문이 남은 발화는 일단 뺀다. 비율이 크면 읽기 규칙을 넣는다.
 
-## 5. 학습
-
-학습 결과(`data`, `exp`, `mfcc`)는 수십 GB 가 되므로 외장 SSD 에 두고 링크한다.
+## 6. 학습
 
 ```bash
 cd ~/bodeultext/egs/aihub_medical/s5
-mkdir -p /Volumes/SSD/kaldi-work/{data,exp,mfcc}
-ln -s /Volumes/SSD/kaldi-work/data data
-ln -s /Volumes/SSD/kaldi-work/exp exp
-ln -s /Volumes/SSD/kaldi-work/mfcc mfcc
-
-./run.sh --train-labels /Volumes/SSD/aihub/train/labels \
-         --train-audio  /Volumes/SSD/aihub/train/audio \
-         --test-labels  /Volumes/SSD/aihub/valid/labels \
-         --test-audio   /Volumes/SSD/aihub/valid/audio \
+./run.sh --train-labels ~/aihub/train/labels --train-audio ~/aihub/train/audio \
+         --test-labels  ~/aihub/valid/labels --test-audio  ~/aihub/valid/audio \
          --terms ~/-AI/src/voice_ai/data/terms
 ```
 
-멈췄으면 `--stage N` 으로 이어서 한다(단계 번호는 `run.sh` 맨 위). 학습 중에는
-잠자기를 막는다: 다른 터미널에서 `caffeinate -i` 를 켜 두거나 `caffeinate -i ./run.sh ...`.
+| 단계 | 내용 | 장치 | 110시간 기준 예상 |
+|---|---|---|---|
+| 0~4 | 데이터, 사전, 언어모델, 특징 | CPU | 1~2시간 |
+| 5~9 | GMM (mono~tri3) + 평가 | CPU | 반나절 |
+| 10 | 신경망 (i-vector, 격자, TDNN-F 4 epoch) | CPU+GPU | 반나절~하루 |
 
-110시간 기준 대략 반나절~하루를 예상한다. 메모리가 모자라 멈추면 `--nj 4` 로 줄인다.
+시간은 노트북 CPU 와 데이터 양에 따라 크게 다르다. 처음 돌릴 때 재 두면 다음 계획이 쉽다.
 
-## 6. 결과 읽기
+**멈췄다 이어 하기.** Ubuntu 창을 닫거나 노트북을 써야 하면 `Ctrl+C` 로 멈춘다.
+
+```bash
+./run.sh --stage 7 ...                       # GMM 은 단계 번호로 (run.sh 맨 위 참고)
+local/chain/run_tdnn.sh --stage 12 --train-stage 37   # 신경망은 반복 번호로
+```
+
+신경망은 반복마다 모델을 저장한다. 이어 할 번호는 `exp/chain/tdnn1a/` 안의 가장 큰
+`N.mdl` 의 N 이다.
+
+**GPU 메모리가 모자라면**(`out of memory`) `local/chain/run_tdnn.sh --stage 12 --minibatch 64,32`.
+
+**노트북 관리.** 충전기를 꽂고, 통풍되는 곳(쿨링패드)에 둔다. GPU 85°C 이하는 정상이다.
+제조사 앱에 배터리 충전 80% 제한이 있으면 켜 둔다. 학습은 GPU 를 닳게 하지 않는다.
+
+## 7. 결과 읽기
 
 ```
-%WER ... exp/tri3/decode_test/...   어절 오류율
-%WER ... (best_cer)                 글자 오류율  <- 이걸로 비교
+%WER ... exp/chain/tdnn1a/decode_test/...   어절 오류율
+%WER ... (best_cer)                         글자 오류율  <- 이걸로 비교
 ```
 
 한국어는 띄어쓰기가 흔들려 WER 이 실제보다 나빠 보인다. **CER 로 비교한다.**
@@ -140,11 +214,35 @@ ln -s /Volumes/SSD/kaldi-work/mfcc mfcc
 **주의:** 이 데이터는 정해진 문장을 여러 사람이 읽은 낭독체다. 평가 문장이 학습 문장과
 겹칠 수 있어 점수가 실제보다 좋게 나온다. 진짜 성능은 **-AI 의 실제 진료 녹음**으로
 whisper turbo 와 같은 기준(검사 수치, 의료 용어, 지어낸 문장 수)으로 재야 한다.
-그 비교 스크립트가 다음 작업이다.
+
+## 다 쓰고 지우기
+
+관리자 PowerShell 에서:
+
+```powershell
+wsl --unregister Ubuntu-24.04      # 리눅스와 그 안의 모든 것(Kaldi, 데이터, 모델) 삭제
+rmdir /s D:\wsl                    # 빈 폴더 정리
+```
+
+학습한 모델을 남기려면 지우기 전에 `exp/chain/tdnn1a_online`, `exp/chain/tree/graph`,
+`data/lang_test` 를 Windows 쪽(`/mnt/d/...`)으로 복사해 둔다. 수백 MB 다.
+
+## Mac 에서 (GMM 만)
+
+Mac 은 NVIDIA GPU 가 없어 10 단계(신경망)는 건너뛰고 tri3 에서 멈춘다.
+
+```bash
+brew install automake autoconf libtool sox wget cmake python git bash \
+             coreutils gnu-sed gawk grep findutils unar
+pip3 install morfessor
+cd ~/bodeultext/tools && make -j 8
+cd ../src && ./configure --shared && make depend -j 8 && make -j 8
+```
+
+`path.sh` 가 brew 의 GNU 도구를 앞에 둔다. 외장 SSD 는 APFS 로 포맷한다.
 
 ## 다음 작업
 
-1. 실제 진료 녹음 하나를 tri3 로 인식하는 스크립트 (긴 녹음을 잘라 디코딩)
+1. 실제 진료 녹음 하나를 인식하는 스크립트 (긴 녹음을 잘라 디코딩)
 2. 한글 숫자 → 아라비아 숫자 후처리 ("이백 십 육" → 216)
 3. -AI 녹음으로 whisper turbo 와 맞대기
-4. 결과가 좋으면 데이터를 늘리고 신경망(chain) 단계 추가
