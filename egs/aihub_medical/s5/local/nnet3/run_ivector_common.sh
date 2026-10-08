@@ -12,6 +12,7 @@ nj=6
 train_set=train
 test_sets=test
 gmm=tri3
+ubm_gauss=512         # 데이터가 아주 적을 때(시험용)만 줄인다.
 speed_perturb=false   # true 면 데이터를 0.9/1.0/1.1 배속으로 3배 불린다. 정확도는 오르고 시간도 3배.
 
 . ./cmd.sh
@@ -58,7 +59,7 @@ fi
 
 if [ $stage -le 5 ]; then
   steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj $(nj_of data/${train_set}_subset_hires) \
-    --num-frames 700000 data/${train_set}_subset_hires 512 exp/nnet3/pca_transform exp/nnet3/diag_ubm
+    --num-frames 700000 data/${train_set}_subset_hires $ubm_gauss exp/nnet3/pca_transform exp/nnet3/diag_ubm
 fi
 
 if [ $stage -le 6 ]; then
