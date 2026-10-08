@@ -29,6 +29,7 @@ use_gpu=true            # false 면 CPU 로 돈다. 아주 느리다(동작 확�
 num_epochs=4
 minibatch=128,64        # GPU 메모리가 모자라면 64,32 로 줄인다.
 remove_egs=true
+egs_extra=              # 시험용 소량 데이터면 "--num-utts-subset 50"
 
 . ./cmd.sh
 . ./path.sh
@@ -141,7 +142,7 @@ if [ $stage -le 12 ]; then
     --egs.chunk-width=140,100,160 \
     --egs.chunk-left-context=0 \
     --egs.chunk-right-context=0 \
-    --egs.opts="--frames-overlap-per-eg 0" \
+    --egs.opts="--frames-overlap-per-eg 0 $egs_extra" \
     --egs.cmd="$train_cmd" \
     --cleanup.remove-egs=$remove_egs \
     --use-gpu=$use_gpu \
