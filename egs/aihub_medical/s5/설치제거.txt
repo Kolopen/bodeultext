@@ -46,10 +46,10 @@ del E:\wsl\ubuntu.tar
 
 이제 리눅스 전체가 E:\wsl\ubuntu\ext4.vhdx 파일 하나에 들어 있다.
 
-안에서 파일을 지워도 이 파일은 저절로 줄지 않는다. 지운 만큼 E: 공간이
-돌아오게 아래를 한 번 실행해 둔다 (오래된 WSL 이면 'wsl --update' 먼저).
-
-wsl --manage Ubuntu-24.04 --set-sparse true
+안에서 파일을 지워도 이 파일은 줄지 않는다(지운 자리는 Ubuntu 가 다시 쓴다).
+그래서 zip 은 Ubuntu 밖(E:\aihub-zip)에 받아 바로 지운다.
+'wsl --manage ... --set-sparse true' 는 Microsoft 가 데이터 손상 위험으로 막아 두었다.
+--allow-unsafe 로 강제로 켜지 않는다.
 
 
 [4] 로그인 사용자 되돌리기  -  Ubuntu 터미널
