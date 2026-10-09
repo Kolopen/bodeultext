@@ -83,7 +83,7 @@ PowerShell 에서 `wsl --shutdown` 후 Ubuntu 를 다시 열면 적용된다.
 ```bash
 sudo apt update
 sudo apt install -y build-essential git automake autoconf libtool sox gfortran \
-  python3 python3-pip zlib1g-dev wget unzip unar subversion libopenblas-dev locales
+  python3 python3-pip zlib1g-dev wget unzip unar subversion libopenblas-dev locales python-is-python3
 sudo locale-gen en_US.UTF-8                       # 이게 없으면 Kaldi 가 한글을 깨진 글자로 본다
 pip3 install --break-system-packages morfessor
 
