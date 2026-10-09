@@ -19,7 +19,7 @@
   prep     라벨과 음성을 짝지어 Kaldi 데이터 폴더를 만든다.
            (wav.scp, text, utt2spk, spk2gender, utt2dur)
 
-  python3 local/aihub.py inspect --labels /Volumes/SSD/aihub/labels/train
+  python3 local/aihub.py inspect --labels /mnt/e/aihub/train/labels   (폴더, zip, 폴더 안의 zip)
   python3 local/aihub.py prep --labels .../labels/train --audio .../audio/train \\
       --out data/train
 """
@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import zipfile
 
 # 비식별화 태그(#@이름# 등). 음성에는 실제 이름이 들어 있으므로 태그로
 # 학습하면 소리와 글자가 어긋난다. 이런 발화는 뺀다.
@@ -64,17 +65,53 @@ def normalize(text):
     return text, None
 
 
-def iter_labels(root):
+def iter_zip_labels(path):
+    # 라벨이 200만 개쯤이라 풀어 두면 옮기기만 몇 시간이다. zip 안에서 바로 읽는다.
+    try:
+        archive = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        sys.exit(f"zip 을 열 수 없습니다: {path}\n"
+                 "  AI-Hub 가 큰 파일을 조각(.zip.part0, .zip.part1073741824 ...)으로 보냈다면\n"
+                 "  조각을 순서대로 이어 붙인 zip 이어야 합니다. 조각이 있는 폴더에서:\n"
+                 "    cat $(ls 라벨링데이터.zip.part* | sort -V) > 합친파일.zip")
+    with archive:
+        for info in archive.infolist():
+            if info.is_dir() or not info.filename.lower().endswith(".json"):
+                continue
+            where = f"{path}!{info.filename}"
+            try:
+                yield where, json.loads(archive.read(info).decode("utf-8-sig"))
+            except (ValueError, UnicodeDecodeError) as e:
+                print(f"읽을 수 없는 라벨: {where} ({e})", file=sys.stderr)
+
+
+def iter_labels_raw(root):
+    if os.path.isfile(root):
+        yield from iter_zip_labels(root)
+        return
     for dirpath, _, files in os.walk(root):
         for name in sorted(files):
-            if not name.lower().endswith(".json"):
-                continue
             path = os.path.join(dirpath, name)
-            try:
-                with open(path, encoding="utf-8-sig") as f:
-                    yield path, json.load(f)
-            except (ValueError, UnicodeDecodeError) as e:
-                print(f"읽을 수 없는 라벨: {path} ({e})", file=sys.stderr)
+            lower = name.lower()
+            if lower.endswith(".zip"):
+                yield from iter_zip_labels(path)
+            elif lower.endswith(".json"):
+                try:
+                    with open(path, encoding="utf-8-sig") as f:
+                        yield path, json.load(f)
+                except (ValueError, UnicodeDecodeError) as e:
+                    print(f"읽을 수 없는 라벨: {path} ({e})", file=sys.stderr)
+
+
+def iter_labels(root):
+    """폴더(하위 폴더까지), zip 파일, 폴더 안의 zip 을 모두 읽는다."""
+    n = 0
+    for item in iter_labels_raw(root):
+        n += 1
+        if n % 100000 == 0:
+            # 수백만 개를 읽는 동안 멈춘 것처럼 보이지 않게 한다.
+            print(f"  라벨 {n}개 읽는 중...", file=sys.stderr, flush=True)
+        yield item
 
 
 def field(label, *keys, default=""):
@@ -284,12 +321,12 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("inspect", help="라벨의 전사 표기를 센다")
-    p.add_argument("--labels", required=True, help="라벨 JSON 폴더 (하위 폴더까지 찾음)")
+    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
     p.add_argument("--examples", type=int, default=5, help="항목마다 보여줄 예시 수")
     p.set_defaults(func=cmd_inspect)
 
     p = sub.add_parser("prep", help="Kaldi 데이터 폴더를 만든다")
-    p.add_argument("--labels", required=True)
+    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
     p.add_argument("--audio", required=True, help="원천데이터(.wav) 폴더")
     p.add_argument("--out", required=True)
     p.add_argument("--rate", type=int, default=16000)
