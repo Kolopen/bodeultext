@@ -45,8 +45,9 @@ if [ $stage -le 0 ]; then
     fi
   done
   python3 local/aihub.py prep --labels $train_labels --audio $train_audio --out data/train
+  # 평가는 학습에 없던 문장으로만 한다. 같은 문장을 외워서 맞히는 점수를 피한다.
   python3 local/aihub.py prep --labels $test_labels --audio $test_audio --out data/test \
-    --max-utts $test_utts
+    --max-utts $test_utts --unseen-from data/train/text
   for d in train test; do
     cp data/$d/text data/$d/text.word
     utils/fix_data_dir.sh data/$d

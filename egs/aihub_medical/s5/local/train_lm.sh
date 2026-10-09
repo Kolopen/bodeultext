@@ -18,7 +18,9 @@ dir=$3
 order=${LM_ORDER:-3}
 
 mkdir -p $dir
-cut -d' ' -f2- $text > $dir/corpus.txt
+# 같은 문장을 여러 사람이 읽은 데이터라, 그대로 넣으면 언어모델이 그 문장들만
+# 나온다고 배운다. 문장마다 한 번씩만 넣는다.
+cut -d' ' -f2- $text | sort -u > $dir/corpus.txt
 if [ "$extra" != "-" ] && [ -s "$extra" ]; then
   cat $extra >> $dir/corpus.txt
 fi

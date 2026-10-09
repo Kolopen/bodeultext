@@ -279,6 +279,18 @@ def cmd_prep(args):
         sys.exit("짝지어진 발화가 없습니다. --labels 와 --audio 가 같은 세트(Training/Validation)인지 확인해 주세요.")
 
     rows.sort(key=lambda r: r[0])
+    if args.unseen_from:
+        # 이 데이터는 같은 문장을 여러 사람이 읽었다. 평가 문장이 학습에도 있으면
+        # 모델이 문장을 외워서 맞히므로 점수가 실제보다 좋게 나온다.
+        with open(args.unseen_from, encoding="utf-8") as f:
+            seen = {line.split(maxsplit=1)[1].strip() for line in f if " " in line.strip()}
+        unseen = [r for r in rows if r[4] not in seen]
+        print(f"  학습에 없던 문장의 발화 {len(unseen)}개 / 전체 {len(rows)}개")
+        if len(unseen) >= args.min_unseen:
+            rows = unseen
+        else:
+            print(f"  경고: {args.min_unseen}개보다 적어 전체로 평가합니다. "
+                  "점수가 실제보다 좋게 나올 수 있습니다.")
     if args.max_utts and len(rows) > args.max_utts:
         # 화자가 고르게 들어가도록 일정 간격으로 고른다.
         step = len(rows) / args.max_utts
@@ -333,6 +345,9 @@ def main():
     p.add_argument("--min-sec", type=float, default=0.5)
     p.add_argument("--max-sec", type=float, default=20.0)
     p.add_argument("--max-utts", type=int, default=0, help="0이면 전부")
+    p.add_argument("--unseen-from", help="이 Kaldi text 에 있는 문장은 뺀다 (평가용)")
+    p.add_argument("--min-unseen", type=int, default=200,
+                   help="뺀 뒤 이보다 적으면 빼지 않고 전체를 쓴다")
     p.set_defaults(func=cmd_prep)
 
     args = parser.parse_args()
