@@ -217,15 +217,34 @@ whisper turbo 와 같은 기준(검사 수치, 의료 용어, 지어낸 문장 �
 
 ## 다 쓰고 지우기
 
-관리자 PowerShell 에서:
+**① 남길 것 먼저 복사** (Ubuntu 안에서, 외장 SSD 가 `D:` 일 때). 수백 MB 다.
 
-```powershell
-wsl --unregister Ubuntu-24.04      # 리눅스와 그 안의 모든 것(Kaldi, 데이터, 모델) 삭제
-rmdir /s D:\wsl                    # 빈 폴더 정리
+```bash
+mkdir -p /mnt/d/kaldi-model
+cd ~/bodeultext/egs/aihub_medical/s5
+cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph data/lang_test /mnt/d/kaldi-model/
 ```
 
-학습한 모델을 남기려면 지우기 전에 `exp/chain/tdnn1a_online`, `exp/chain/tree/graph`,
-`data/lang_test` 를 Windows 쪽(`/mnt/d/...`)으로 복사해 둔다. 수백 MB 다.
+**② 리눅스 통째로 삭제** — 관리자 PowerShell
+
+```powershell
+wsl --shutdown
+wsl --unregister Ubuntu-24.04      # Kaldi, CUDA, 데이터, 학습 결과 전부 삭제
+Remove-Item -Recurse -Force D:\wsl    # 남은 빈 폴더
+Remove-Item $env:USERPROFILE\.wslconfig   # 메모리 설정 파일
+```
+
+**③ WSL 기능까지 끄기** (선택). 다시 쓸 일이 없으면.
+
+```powershell
+wsl --uninstall
+dism /online /disable-feature /featurename:Microsoft-Windows-Subsystem-Linux /norestart
+dism /online /disable-feature /featurename:VirtualMachinePlatform /norestart
+```
+
+재부팅하면 설치 전 상태다. 설정 → 앱 목록에 "Ubuntu" 가 남아 있으면 거기서 제거한다.
+NVIDIA 드라이버는 원래 쓰던 것이라 그대로 둔다. Windows 쪽에는 CUDA 를 깔지 않았으므로
+지울 것이 없다.
 
 ## Mac 에서 (GMM 만)
 
