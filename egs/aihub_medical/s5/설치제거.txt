@@ -158,6 +158,30 @@ df -h /mnt/e
 라벨 점검, 학습은 같은 폴더의 README.md 5~6절.
 
 
+[10] 컴퓨터를 끌 때 / 다시 켤 때
+------------------------------------------------------------
+끌 때:
+  1. Ubuntu 창에서 돌고 있는 명령이 있으면 끝날 때까지 기다리거나 Ctrl+C 로 멈춘다.
+     (unpack_aihub.py, run.sh 는 다시 실행하면 이어서 한다)
+  2. Ubuntu 창에서:  exit
+  3. PowerShell 에서: wsl --shutdown
+  4. Windows 를 평소처럼 끈다.
+  * E: 가 외장 SSD 면, 3번을 한 뒤에 뽑는다. Ubuntu 가 E: 안에 있다.
+
+다시 켤 때:
+  1. (외장 SSD 면) E: 를 먼저 꽂는다.
+  2. 시작 메뉴 -> 터미널 -> 위쪽 v 버튼 -> Ubuntu-24.04
+     (또는 PowerShell 에서 wsl -d Ubuntu-24.04)
+  3. Ubuntu 창에서:
+       cd ~/bodeultext && git pull
+       cd ~/bodeultext/egs/aihub_medical/s5
+  4. 하던 단계부터 이어서 한다.
+     - 데이터 꺼내기: 같은 unpack_aihub.py 명령을 다시 (끝난 파일은 건너뜀)
+     - 학습: ./run.sh --stage N ...  (N 은 멈춘 단계, run.sh 맨 위 참고)
+     - 신경망: local/chain/run_tdnn.sh --stage 12 --train-stage M
+       (M 은 exp/chain/tdnn1a/ 안의 가장 큰 숫자.mdl 의 숫자)
+
+
 ############################################################
 #  B. 제거
 ############################################################
