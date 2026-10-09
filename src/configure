@@ -388,9 +388,21 @@ Either your CUDA is too new or too old."
           MIN_UNSUPPORTED_GCC_VER_NUM=120000
           CUSOLVER=true
         ;;
-        12_*)
+        12_[0-3])
           MIN_UNSUPPORTED_GCC_VER="12.3"
           MIN_UNSUPPORTED_GCC_VER_NUM=123000
+          CUSOLVER=true
+        ;;
+        12_[4-7])
+          # CUDA 12.4 added GCC 13 as a supported host compiler.
+          MIN_UNSUPPORTED_GCC_VER="14.0"
+          MIN_UNSUPPORTED_GCC_VER_NUM=140000
+          CUSOLVER=true
+        ;;
+        12_*)
+          # CUDA 12.8 added GCC 14. Needed for RTX 50 series (sm_120) too.
+          MIN_UNSUPPORTED_GCC_VER="15.0"
+          MIN_UNSUPPORTED_GCC_VER_NUM=150000
           CUSOLVER=true
         ;;
         *)

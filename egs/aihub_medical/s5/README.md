@@ -112,16 +112,27 @@ extras/check_dependencies.sh          # MKL, python2.7 경고는 무시한다
 make -j 4
 OPENBLAS_TARGET=HASWELL extras/install_openblas.sh   # 행렬 계산 라이브러리 (최신 CPU 는 TARGET 지정 필요)
 
+~/bodeultext/egs/aihub_medical/s5/local/configure_kaldi.sh   # 아래 configure 를 대신 실행
 cd ../src
-./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda \
-  --cuda-arch="-gencode arch=compute_120,code=sm_120" \
-  --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install
 make depend -j 4
 make -j 4
 ```
 
 `-j 4` 는 WSL 메모리 12GB 기준이다. 메모리가 넉넉하면 늘린다.
 `--mathlib=OPENBLAS` 를 빼면 x86 리눅스에서는 Intel MKL 을 찾다가 멈춘다.
+
+`local/configure_kaldi.sh` 가 실제로 돌리는 명령은 이렇다. 터미널에 길게 붙여넣으면
+줄이 깨져 `Unknown argument` 로 멈추는 일이 잦아 스크립트로 묶었다.
+
+```bash
+./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda \
+  --cuda-arch="-gencode arch=compute_120,code=sm_120" \
+  --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install
+```
+
+원래 Kaldi 의 configure 는 CUDA 12 에 gcc 12.3 미만만 허용해서 Ubuntu 24.04(gcc 13)에서
+거절한다. 이 저장소의 configure 는 NVIDIA 지원표대로 CUDA 12.4+ 는 gcc 13, 12.8+ 는
+gcc 14 까지 받도록 고쳐 두었다.
 
 `--cuda-arch` 는 꼭 준다. Kaldi 의 기본 목록에 RTX 50 시리즈(sm_120)가 아직 없어서,
 안 주면 빌드는 되는데 학습이 GPU 에서 돌지 않는다.

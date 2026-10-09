@@ -115,10 +115,11 @@ OPENBLAS_TARGET=HASWELL extras/install_openblas.sh
 -> 행렬 계산 라이브러리. OPENBLAS_TARGET=HASWELL 이 없으면 최신 CPU 에서
    "Detecting CPU failed" 로 멈춘다. 마지막에 "OpenBLAS is installed successfully." 가 나와야 한다.
 
-cd ../src
-./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda --cuda-arch="-gencode arch=compute_120,code=sm_120" --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install
--> 마지막 쪽에 "Kaldi has been successfully configured." 가 나와야 한다.
+~/bodeultext/egs/aihub_medical/s5/local/configure_kaldi.sh
+-> 긴 configure 명령을 대신 실행한다 (RTX 50 시리즈, CUDA, OpenBLAS 설정 포함).
+   마지막 쪽에 "Kaldi has been successfully configured." 가 나와야 한다.
 
+cd ~/bodeultext/src
 make depend -j 4
 make -j 4
 -> 가장 오래 걸린다. 끝에 "Done" 이 나오면 성공.
