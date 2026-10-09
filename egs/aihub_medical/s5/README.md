@@ -142,16 +142,6 @@ gcc 14 까지 받도록 고쳐 두었다.
 
 ## 4. 데이터 받기
 
-[aihubshell](https://www.aihub.or.kr/static/pdf/aihubshell_가이드.pdf) 로 Ubuntu 안에서
-바로 받는다. 명령 형식은 가이드와 `./aihubshell -help` 로 확인한다.
-
-```bash
-mkdir -p ~/aihub && cd ~/aihub
-curl -o aihubshell https://api.aihub.or.kr/api/aihubshell.do && chmod +x aihubshell
-./aihubshell -mode l | grep 의료진                         # datasetkey 확인
-./aihubshell -mode d -datasetkey <번호> -filekey 48745,48759 -aihubapikey '<키>'
-```
-
 | 순서 | filekey | 내용 | 크기 |
 |---|---|---|---|
 | 1 | 48745, 48759 | 라벨링데이터 (Training, Validation) | 1.3GB |
@@ -159,15 +149,24 @@ curl -o aihubshell https://api.aihub.or.kr/api/aihubshell.do && chmod +x aihubsh
 | 2 | 48761, 48762 | Validation 의사_1, 환자_1 | 18GB |
 | 3 | 나머지 | 결과를 보고 결정 | 약 230GB |
 
+AI-Hub 에서 받은 파일은 겹겹이 싸여 있다. 받은 파일은 tar 이고(브라우저가 `환자1` 처럼
+이름을 바꾸기도 한다), 그 안에 진짜 zip 의 1GB 조각들(`환자_1.zip.part0`,
+`.part1073741824`, ...)이 들어 있다. `local/unpack_aihub.py` 가 조각들을 이어진 zip
+하나처럼 읽어서 한 번에 처리한다. 임시 파일이 생기지 않는다.
+
 ```bash
-unar -o train/labels 라벨링데이터.zip     # unzip 은 한글 파일 이름이 깨진다
-unar -o train/audio  의료진_의사_1.zip
-unar -o train/audio  환자_1.zip
-# Validation 도 같은 식으로 valid/labels, valid/audio 에
+cd ~/bodeultext/egs/aihub_medical/s5
+# 음성: wav 를 바로 꺼낸다. 멈췄으면 같은 명령을 다시 하면 이어서 한다.
+python3 local/unpack_aihub.py "/mnt/e/aihub-zip/받은파일" --out /mnt/e/aihub/train/audio
+# 라벨: 풀지 않고 zip 하나로만 (local/aihub.py 가 zip 안을 바로 읽는다)
+python3 local/unpack_aihub.py "/mnt/e/aihub-zip/받은라벨파일" --join /mnt/e/aihub/train/labels
 ```
 
-**폴더 이름에 공백이 없어야 한다**(Kaldi 가 경로를 공백으로 자른다). Windows 쪽
-폴더(`/mnt/c/...`)에 두면 아주 느려지므로 Ubuntu 안(`~/aihub`)에 둔다.
+받은 파일, 조각 폴더, 이미 합친 zip 어느 것을 줘도 된다. 파일마다 CRC 를 확인하고,
+조각이 빠졌거나 다운로드가 덜 됐으면 알려준다. 끝에 `깨짐 0` 이면 받은 파일을 지운다.
+
+`unar` 는 20GB 넘는 zip(zip64)을 중간까지만 풀고 `Archive parsing failed` 로 멈추는
+일이 있어 쓰지 않는다. **폴더 이름에 공백이 없어야 한다**(Kaldi 가 경로를 공백으로 자른다).
 
 ## 5. 음성 받기 전에: 라벨 점검
 
@@ -177,7 +176,7 @@ unar -o train/audio  환자_1.zip
 
 ```bash
 cd ~/bodeultext/egs/aihub_medical/s5
-python3 local/aihub.py inspect --labels ~/aihub/train/labels
+python3 local/aihub.py inspect --labels /mnt/e/aihub/train/labels
 ```
 
 지금 규칙은 이렇다(`local/aihub.py` 의 `normalize`).
@@ -191,8 +190,8 @@ python3 local/aihub.py inspect --labels ~/aihub/train/labels
 
 ```bash
 cd ~/bodeultext/egs/aihub_medical/s5
-./run.sh --train-labels ~/aihub/train/labels --train-audio ~/aihub/train/audio \
-         --test-labels  ~/aihub/valid/labels --test-audio  ~/aihub/valid/audio \
+./run.sh --train-labels /mnt/e/aihub/train/labels --train-audio /mnt/e/aihub/train/audio \
+         --test-labels  /mnt/e/aihub/valid/labels --test-audio  /mnt/e/aihub/valid/audio \
          --terms ~/-AI/src/voice_ai/data/terms
 ```
 

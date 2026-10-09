@@ -130,35 +130,30 @@ cd ../egs/yesno/s5
 -> 마지막에 %WER 0.00 이 나오면 설치 끝
 
 
-[9] 데이터 받기 (zip 은 하나씩 풀고 바로 지운다)  -  Ubuntu 터미널
+[9] 데이터 받기  -  Ubuntu 터미널
 ------------------------------------------------------------
-zip 은 E: 의 Windows 쪽 폴더에 받고, 푼 것만 Ubuntu 안에 둔다.
-(Ubuntu 안에서 E: 는 /mnt/e 로 보인다)
+AI-Hub 에서 받은 파일은 겹겹이 싸여 있다.
+  받은 파일(tar, 브라우저가 '환자1' 처럼 이름을 바꾸기도 함)
+   └─ ...원천데이터/환자_1.zip.part0, .part1073741824, ...  (진짜 zip 의 1GB 조각들)
+local/unpack_aihub.py 가 이걸 한 번에 처리한다. 반디집, 조각 합치기 필요 없다.
 
-mkdir -p /mnt/e/aihub-zip ~/aihub
-cd /mnt/e/aihub-zip
-curl -o aihubshell https://api.aihub.or.kr/api/aihubshell.do
-chmod +x aihubshell
-./aihubshell -mode l | grep 의료진
--> datasetkey 번호 확인
+받은 파일은 E:\aihub-zip 에 둔다 (Ubuntu 에서 /mnt/e/aihub-zip).
+cd ~/bodeultext/egs/aihub_medical/s5
 
-라벨부터 (1.3GB):
-./aihubshell -mode d -datasetkey <번호> -filekey 48745 -aihubapikey '<API키>'
--> 받은 zip 이름은 ls 로 확인
-unar -o ~/aihub/train/labels <받은 zip>
-rm <받은 zip>
-(Validation 라벨 48759 는 ~/aihub/valid/labels 로 같은 방법)
+음성 -> wav 를 바로 꺼낸다 (하나 받을 때마다):
+python3 local/unpack_aihub.py "/mnt/e/aihub-zip/받은파일" --out /mnt/e/aihub/train/audio
+-> 끝에 "깨짐 0" 이면 받은 파일을 지운다.
+-> 중간에 멈췄으면 같은 명령을 다시 하면 이어서 한다.
+   Training 의사_1, 환자_1 ...         --out /mnt/e/aihub/train/audio
+   Validation 의사_1, 환자_1 ...       --out /mnt/e/aihub/valid/audio
 
-음성 (하나씩, 받기 -> 풀기 -> 지우기):
-  48750 의료진_의사_1 -> ~/aihub/train/audio
-  48753 환자_1        -> ~/aihub/train/audio
-  48761 Validation 의료진_의사_1 -> ~/aihub/valid/audio
-  48762 Validation 환자_1        -> ~/aihub/valid/audio
+라벨 -> 풀지 않고 zip 하나로만 만든다 (200만 개라 풀면 몇 시간 걸린다):
+python3 local/unpack_aihub.py "/mnt/e/aihub-zip/받은라벨파일" --join /mnt/e/aihub/valid/labels
+   Training 라벨    --join /mnt/e/aihub/train/labels
+   Validation 라벨  --join /mnt/e/aihub/valid/labels
 
-df -h ~
--> 중간중간 남은 공간 확인
-
-aihubshell 명령 형식은 AI-Hub 의 aihubshell 가이드 기준으로 확인한다.
+df -h /mnt/e
+-> 남은 공간은 이걸로 본다 (df -h ~ 는 가상 크기라 실제보다 크게 나온다).
 
 라벨 점검, 학습은 같은 폴더의 README.md 5~6절.
 

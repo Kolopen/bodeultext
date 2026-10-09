@@ -6,10 +6,10 @@
 # 0~9 단계(GMM)는 CPU 로, 10 단계(신경망)는 NVIDIA GPU 로 돈다.
 # Windows 는 WSL2 안에서 돌린다(README 참고).
 #
-#   ./run.sh --train-labels ~/aihub/train/labels \
-#            --train-audio  ~/aihub/train/audio \
-#            --test-labels  ~/aihub/valid/labels \
-#            --test-audio   ~/aihub/valid/audio \
+#   ./run.sh --train-labels /mnt/e/aihub/train/labels \
+#            --train-audio  /mnt/e/aihub/train/audio \
+#            --test-labels  /mnt/e/aihub/valid/labels \
+#            --test-audio   /mnt/e/aihub/valid/audio \
 #            --terms ~/-AI/src/voice_ai/data/terms
 #
 # 중간에 멈췄으면 --stage N 으로 그 단계부터 다시 시작한다.
