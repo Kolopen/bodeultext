@@ -110,7 +110,7 @@ git clone https://github.com/Kolopen/-AI.git ~/-AI          # 의료 용어 사�
 cd ~/bodeultext/tools
 extras/check_dependencies.sh          # MKL, python2.7 경고는 무시한다
 make -j 4
-extras/install_openblas.sh            # 행렬 계산 라이브러리
+OPENBLAS_TARGET=HASWELL extras/install_openblas.sh   # 행렬 계산 라이브러리 (최신 CPU 는 TARGET 지정 필요)
 
 cd ../src
 ./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda \

@@ -111,8 +111,9 @@ extras/check_dependencies.sh
 
 make -j 4
 
-extras/install_openblas.sh
--> 행렬 계산 라이브러리. 마지막에 "OpenBLAS is installed successfully." 가 나와야 한다.
+OPENBLAS_TARGET=HASWELL extras/install_openblas.sh
+-> 행렬 계산 라이브러리. OPENBLAS_TARGET=HASWELL 이 없으면 최신 CPU 에서
+   "Detecting CPU failed" 로 멈춘다. 마지막에 "OpenBLAS is installed successfully." 가 나와야 한다.
 
 cd ../src
 ./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda --cuda-arch="-gencode arch=compute_120,code=sm_120" --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install

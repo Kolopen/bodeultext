@@ -32,7 +32,11 @@ fi
 tar xzf $tarball
 mv OpenMathLib-OpenBLAS-* OpenBLAS
 
-make PREFIX=$(pwd)/OpenBLAS/install USE_LOCKING=1 USE_THREAD=0 -C OpenBLAS all install
+# OpenBLAS $OPENBLAS_VERSION cannot detect CPUs newer than itself ("Detecting CPU
+# failed"). Set OPENBLAS_TARGET (e.g. HASWELL, which runs on any AVX2 x86-64 CPU)
+# to skip detection.
+make PREFIX=$(pwd)/OpenBLAS/install USE_LOCKING=1 USE_THREAD=0 \
+  ${OPENBLAS_TARGET:+TARGET=$OPENBLAS_TARGET} -C OpenBLAS all install
 if [ $? -eq 0 ]; then
    echo "OpenBLAS is installed successfully."
    rm $tarball
