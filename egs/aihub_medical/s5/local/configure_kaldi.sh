@@ -30,6 +30,6 @@ else
     echo "$0: CUDA 를 못 찾았습니다: $cuda_dir/bin/nvcc (README 의 CUDA 설치 참고)" >&2
     exit 1
   fi
-  ./configure --shared --use-cuda --cudatk-dir="$cuda_dir" --cuda-arch="$cuda_arch" \
+  ./configure --shared --use-cuda=yes --cudatk-dir="$cuda_dir" --cuda-arch="$cuda_arch" \
     --mathlib=OPENBLAS --openblas-root="$openblas"
 fi

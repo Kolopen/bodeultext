@@ -125,7 +125,7 @@ make -j 4
 줄이 깨져 `Unknown argument` 로 멈추는 일이 잦아 스크립트로 묶었다.
 
 ```bash
-./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda \
+./configure --shared --use-cuda=yes --cudatk-dir=/usr/local/cuda \
   --cuda-arch="-gencode arch=compute_120,code=sm_120" \
   --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install
 ```
