@@ -101,22 +101,27 @@ sudo apt install -y cuda-toolkit-12-8
 /usr/local/cuda/bin/nvcc --version                # 12.8 이 나오면 된다
 ```
 
-## 3. Kaldi 빌드 (한 번만, 1~2시간)
+## 3. Kaldi 빌드 (한 번만, 2~3시간)
 
 ```bash
 git clone -b claude/eloquent-cray-29ssw9 https://github.com/Kolopen/bodeultext.git ~/bodeultext
 git clone https://github.com/Kolopen/-AI.git ~/-AI          # 의료 용어 사전
 
 cd ~/bodeultext/tools
-extras/check_dependencies.sh          # 빠진 것이 있으면 알려준다
-make -j 8
+extras/check_dependencies.sh          # MKL, python2.7 경고는 무시한다
+make -j 4
+extras/install_openblas.sh            # 행렬 계산 라이브러리
 
 cd ../src
 ./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda \
-  --cuda-arch="-gencode arch=compute_120,code=sm_120"
-make depend -j 8
-make -j 8
+  --cuda-arch="-gencode arch=compute_120,code=sm_120" \
+  --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install
+make depend -j 4
+make -j 4
 ```
+
+`-j 4` 는 WSL 메모리 12GB 기준이다. 메모리가 넉넉하면 늘린다.
+`--mathlib=OPENBLAS` 를 빼면 x86 리눅스에서는 Intel MKL 을 찾다가 멈춘다.
 
 `--cuda-arch` 는 꼭 준다. Kaldi 의 기본 목록에 RTX 50 시리즈(sm_120)가 아직 없어서,
 안 주면 빌드는 되는데 학습이 GPU 에서 돌지 않는다.

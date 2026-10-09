@@ -96,18 +96,31 @@ sudo apt install -y cuda-toolkit-12-8
 -> 12.8 이 나오면 성공
 
 
-[8] Kaldi 빌드 (1~2시간)  -  Ubuntu 터미널
+[8] Kaldi 빌드 (2~3시간)  -  Ubuntu 터미널
 ------------------------------------------------------------
-git clone -b claude/eloquent-cray-29ssw9 https://github.com/Kolopen/bodeultext.git ~/bodeultext
-git clone https://github.com/Kolopen/-AI.git ~/-AI
+메모리가 12GB 라 동시 작업 수를 4 로 둔다 (-j 4). 8 로 하면 메모리가 모자라 멈출 수 있다.
+
+cd ~
+git clone -b claude/eloquent-cray-29ssw9 https://github.com/Kolopen/bodeultext.git
+git clone https://github.com/Kolopen/-AI.git
 
 cd ~/bodeultext/tools
-make -j 8
+extras/check_dependencies.sh
+-> "Intel MKL does not seem to be installed", "python2.7 is not installed" 는 무시한다.
+   그 밖에 설치하라는 것이 있으면 sudo apt install 로 설치한다.
+
+make -j 4
+
+extras/install_openblas.sh
+-> 행렬 계산 라이브러리. 마지막에 "OpenBLAS is installed successfully." 가 나와야 한다.
 
 cd ../src
-./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda --cuda-arch="-gencode arch=compute_120,code=sm_120"
-make depend -j 8
-make -j 8
+./configure --shared --use-cuda --cudatk-dir=/usr/local/cuda --cuda-arch="-gencode arch=compute_120,code=sm_120" --mathlib=OPENBLAS --openblas-root=../tools/OpenBLAS/install
+-> 마지막 쪽에 "Kaldi has been successfully configured." 가 나와야 한다.
+
+make depend -j 4
+make -j 4
+-> 가장 오래 걸린다. 끝에 "Done" 이 나오면 성공.
 
 확인:
 cd ../egs/yesno/s5
