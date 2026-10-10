@@ -154,13 +154,18 @@ AI-Hub 에서 받은 파일은 겹겹이 싸여 있다. 받은 파일은 tar 이
 `.part1073741824`, ...)이 들어 있다. `local/unpack_aihub.py` 가 조각들을 이어진 zip
 하나처럼 읽어서 한 번에 처리한다. 임시 파일이 생기지 않는다.
 
+받은 파일은 이름 그대로(`미확인 323442.crdownload` 같은 이름도 괜찮다) `E:\aihub-zip` 에 모으고:
+
 ```bash
 cd ~/bodeultext/egs/aihub_medical/s5
-# 음성: wav 를 바로 꺼낸다. 멈췄으면 같은 명령을 다시 하면 이어서 한다.
-python3 local/unpack_aihub.py "/mnt/e/aihub-zip/받은파일" --out /mnt/e/aihub/train/audio
-# 라벨: 풀지 않고 zip 하나로만 (local/aihub.py 가 zip 안을 바로 읽는다)
-python3 local/unpack_aihub.py "/mnt/e/aihub-zip/받은라벨파일" --join /mnt/e/aihub/train/labels
+python3 local/unpack_aihub.py --list /mnt/e/aihub-zip/*                 # 무엇인지만 보기
+python3 local/unpack_aihub.py /mnt/e/aihub-zip/* --auto /mnt/e/aihub    # 한 번에 처리
 ```
+
+`--auto` 는 안쪽 경로(`1.Training`/`2.Validation`, `원천데이터`/`라벨링데이터`)를 보고
+음성은 `train|valid/audio` 에 wav 로 꺼내고, 라벨은 `train|valid/labels` 에 zip 하나로
+만든다(라벨은 `local/aihub.py` 가 zip 안을 바로 읽으므로 풀지 않는다). 직접 정하려면
+`--out DIR`(wav 꺼내기)이나 `--join DIR`(zip 만들기)을 쓴다.
 
 받은 파일, 조각 폴더, 이미 합친 zip 어느 것을 줘도 된다. 파일마다 CRC 를 확인하고,
 조각이 빠졌거나 다운로드가 덜 됐으면 알려준다. 끝에 `깨짐 0` 이면 받은 파일을 지운다.
