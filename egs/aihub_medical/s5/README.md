@@ -195,9 +195,8 @@ python3 local/aihub.py inspect --labels /mnt/e/aihub/train/labels
 
 ```bash
 cd ~/bodeultext/egs/aihub_medical/s5
-./run.sh --train-labels /mnt/e/aihub/train/labels --train-audio /mnt/e/aihub/train/audio \
-         --test-labels  /mnt/e/aihub/valid/labels --test-audio  /mnt/e/aihub/valid/audio \
-         --terms ~/-AI/src/voice_ai/data/terms
+nohup ./run.sh --nj 4 --data-root /mnt/e/aihub > run.log 2>&1 &
+tail -f run.log            # 진행 보기. Ctrl+C 는 보기만 멈추고 학습은 계속된다
 ```
 
 | 단계 | 내용 | 장치 | 110시간 기준 예상 |

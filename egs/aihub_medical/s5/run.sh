@@ -6,11 +6,12 @@
 # 0~9 단계(GMM)는 CPU 로, 10 단계(신경망)는 NVIDIA GPU 로 돈다.
 # Windows 는 WSL2 안에서 돌린다(README 참고).
 #
-#   ./run.sh --train-labels /mnt/e/aihub/train/labels \
-#            --train-audio  /mnt/e/aihub/train/audio \
-#            --test-labels  /mnt/e/aihub/valid/labels \
-#            --test-audio   /mnt/e/aihub/valid/audio \
-#            --terms ~/-AI/src/voice_ai/data/terms
+#   ./run.sh --data-root /mnt/e/aihub
+#
+# --data-root 는 ROOT/train/labels, ROOT/train/audio, ROOT/valid/labels,
+# ROOT/valid/audio 를 쓴다(local/unpack_aihub.py --auto 가 만드는 구조).
+# 따로 두었으면 --train-labels, --train-audio, --test-labels, --test-audio 로 준다.
+# 의료 용어 사전은 ~/-AI 에 있으면 알아서 쓴다(--terms 로 바꿀 수 있다).
 #
 # 중간에 멈췄으면 --stage N 으로 그 단계부터 다시 시작한다.
 #
@@ -20,11 +21,12 @@
 
 stage=0
 nj=6                # 동시에 돌릴 CPU 작업 수. 메모리가 모자라면 줄인다.
+data_root=
 train_labels=
 train_audio=
 test_labels=
 test_audio=
-terms=              # -AI 의 data/terms 폴더. 비워 두면 용어 없이 간다.
+terms=$HOME/-AI/src/voice_ai/data/terms   # 없으면 용어 없이 간다.
 test_utts=3000      # 평가에 쓸 발화 수. 전부 쓰면 디코딩이 오래 걸린다.
 decode_all=false    # true 면 mono/tri1/tri2 도 하나하나 평가한다.
 chain=true          # false 면 tri3 에서 멈춘다.
@@ -33,6 +35,12 @@ chain=true          # false 면 tri3 에서 멈춘다.
 . ./path.sh
 . utils/parse_options.sh
 
+if [ -n "$data_root" ]; then
+  : ${train_labels:=$data_root/train/labels} ${train_audio:=$data_root/train/audio}
+  : ${test_labels:=$data_root/valid/labels} ${test_audio:=$data_root/valid/audio}
+fi
+[ -d "$terms" ] || terms=
+
 set -euo pipefail
 
 local/check_locale.sh
@@ -40,7 +48,7 @@ local/check_locale.sh
 if [ $stage -le 0 ]; then
   for v in train_labels train_audio test_labels test_audio; do
     if [ -z "${!v}" ]; then
-      echo "$0: --${v//_/-} 를 알려주세요. 맨 위 사용법 참고." >&2
+      echo "$0: --data-root 나 --${v//_/-} 를 알려주세요. 맨 위 사용법 참고." >&2
       exit 1
     fi
   done
