@@ -30,6 +30,8 @@ num_epochs=4
 minibatch=128,64        # GPU 메모리가 모자라면 64,32 로 줄인다.
 remove_egs=true
 egs_extra=              # 시험용 소량 데이터면 "--num-utts-subset 50"
+shuffle_jobs=4          # egs 섞기를 동시에 몇 개 돌릴지. 하나가 1~2GB 를 쓴다(기본 50 이면
+                        # 43개가 한꺼번에 떠서 메모리 12GB 가 모자란다).
 ubm_gauss=512           # 시험용 소량 데이터면 32
 
 . ./cmd.sh
@@ -143,7 +145,7 @@ if [ $stage -le 12 ]; then
     --egs.chunk-width=140,100,160 \
     --egs.chunk-left-context=0 \
     --egs.chunk-right-context=0 \
-    --egs.opts="--frames-overlap-per-eg 0 $egs_extra" \
+    --egs.opts="--frames-overlap-per-eg 0 --max-shuffle-jobs-run $shuffle_jobs $egs_extra" \
     --egs.cmd="$train_cmd" \
     --cleanup.remove-egs=$remove_egs \
     --use-gpu=$use_gpu \

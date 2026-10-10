@@ -109,6 +109,8 @@ nohup ... & 로 띄운 학습은 Ctrl+C 로 멈추지 않는다. 이 스크립�
 
   -> M.mdl 을 읽다가 오류가 나면 저장 도중에 멈춘 것이다. M-1 로 다시 한다.
   -> 숫자.mdl 이 하나도 없으면(아직 egs 를 만들던 중) --train-stage 없이 --stage 12 로.
+     egs 를 만들다 실패했거나(로그에 "job failed, log is in exp/chain/tdnn1a/egs/log/...")
+     도중에 멈췄으면, 반쯤 만든 egs 를 먼저 지운다(수십 GB):  rm -rf exp/chain/tdnn1a/egs
   -> GPU 메모리가 모자라다(out of memory)고 나오면 끝에 --minibatch 64,32 를 붙인다.
 
 (다) GMM 단계(run.sh 0~9)였을 때:
