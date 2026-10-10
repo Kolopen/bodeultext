@@ -131,6 +131,8 @@ def find_zips(src):
         entries = []
         for dirpath, _, files in os.walk(src):
             for name in files:
+                if not (PART_RE.match(name) or name.lower().endswith(".zip")):
+                    continue
                 path = os.path.join(dirpath, name)
                 entries.append((os.path.relpath(path, src), path, 0, os.path.getsize(path)))
         return group_parts(entries)
@@ -221,6 +223,17 @@ def join(name, segments, out_dir, filename=None):
     print(f"{target} ({stream.size / 1e9:.2f}GB)")
 
 
+def load(src):
+    """받은 파일 하나를 읽는다. 없거나 zip 이 아니면 알리고 건너뛴다."""
+    if not os.path.exists(src):
+        print(f"건너뜀 (없음): {src}", file=sys.stderr)
+        return {}
+    groups = find_zips(src)
+    if not groups:
+        print(f"건너뜀 (zip 이나 zip 조각이 없음): {src}", file=sys.stderr)
+    return groups
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -237,8 +250,10 @@ def main():
 
     if args.list:
         for src in args.src:
-            print(src)
-            for key, segments in sorted(find_zips(src).items()):
+            groups = load(src)
+            if groups:
+                print(src)
+            for key, segments in sorted(groups.items()):
                 size = sum(seg[2] for seg in segments)
                 where = classify(key)
                 dest = f"-> {where[0]}/{where[1]}" if where else "-> (경로로 구분 못함)"
@@ -250,11 +265,12 @@ def main():
         if path and re.search(r"\s", os.path.abspath(path)):
             sys.exit(f"{path}: 경로에 공백이 있으면 Kaldi 가 못 읽습니다.")
     bad = 0
+    handled = 0
     for src in args.src:
-        groups = find_zips(src)
+        groups = load(src)
         if not groups:
-            sys.exit(f"zip 이나 zip 조각을 찾지 못했습니다: {src}\n"
-                     "  다운로드가 덜 됐거나 다른 파일일 수 있습니다.")
+            continue
+        handled += 1
         if args.auto:
             for name, segments in sorted(groups.items()):
                 where = classify(name)
@@ -275,6 +291,9 @@ def main():
             continue
         for name, segments in sorted(groups.items()):
             bad += extract(name, segments, args.out, args.ext.lower())
+    if not handled:
+        sys.exit("처리할 파일이 없습니다. 경로와 파일 이름을 'ls' 로 확인해 주세요. "
+                 "다운로드가 덜 된 파일일 수도 있습니다.")
     if bad:
         sys.exit(f"깨진 파일 {bad}개. 같은 명령을 다시 하면 그것만 다시 시도합니다. "
                  "계속 깨지면 다시 받아야 합니다.")
