@@ -65,6 +65,16 @@ def normalize(text):
     return text, None
 
 
+# 같은 문장을 여러 사람이 읽어서 전사에 군말(아/, 음/)과 띄어쓰기 차이가 섞인다.
+# "아 숨이 차고 가슴이 답답해요"와 "숨이차고 가슴이 답답해요"는 같은 문장으로 본다.
+FILLERS = {"아", "어", "음", "으", "에", "예", "네", "그", "저", "응", "흠"}
+
+
+def sentence_key(text):
+    """같은 문장인지 견줄 때 쓰는 열쇠. 군말과 띄어쓰기를 뺀다."""
+    return "".join(w for w in text.split() if w not in FILLERS)
+
+
 def iter_zip_labels(path):
     # 라벨이 200만 개쯤이라 풀어 두면 옮기기만 몇 시간이다. zip 안에서 바로 읽는다.
     try:
@@ -283,8 +293,8 @@ def cmd_prep(args):
         # 이 데이터는 같은 문장을 여러 사람이 읽었다. 평가 문장이 학습에도 있으면
         # 모델이 문장을 외워서 맞히므로 점수가 실제보다 좋게 나온다.
         with open(args.unseen_from, encoding="utf-8") as f:
-            seen = {line.split(maxsplit=1)[1].strip() for line in f if " " in line.strip()}
-        unseen = [r for r in rows if r[4] not in seen]
+            seen = {sentence_key(line.split(maxsplit=1)[1]) for line in f if " " in line.strip()}
+        unseen = [r for r in rows if sentence_key(r[4]) not in seen]
         print(f"  학습에 없던 문장의 발화 {len(unseen)}개 / 전체 {len(rows)}개")
         if len(unseen) >= args.min_unseen:
             rows = unseen
@@ -332,21 +342,31 @@ def cmd_text(args):
 
     언어모델을 넓히는 데 쓴다. 음성을 받지 않은 라벨의 문장도 쓸 수 있다.
     --plain 으로 직접 모은 문장 파일도 같은 규칙으로 정리해 함께 넣는다.
-    --exclude 의 Kaldi text 에 있는 문장(평가 문장)은 뺀다. 빼지 않으면 언어모델이
-    평가 문장을 미리 알게 되어 점수가 실제보다 좋게 나온다.
+    --exclude 의 Kaldi text 에 있는 문장(평가 문장)은 군말·띄어쓰기만 다른 것까지 뺀다.
+    빼지 않으면 언어모델이 평가 문장을 미리 알게 되어 점수가 실제보다 좋게 나온다.
     """
     if not (args.labels or args.plain):
         sys.exit("--labels 나 --plain 을 하나 이상 주세요.")
+    for root in (args.labels or []) + (args.plain or []):
+        if not os.path.exists(root):
+            sys.exit(f"없는 경로입니다: {root}")
     exclude = set()
     for path in args.exclude or []:
         with open(path, encoding="utf-8") as f:
-            exclude.update(line.split(maxsplit=1)[1].strip() for line in f if " " in line.strip())
+            exclude.update(sentence_key(line.split(maxsplit=1)[1]) for line in f if " " in line.strip())
+
     def sentences():
         for root in args.labels or []:
+            n = 0
             for path, label in iter_labels(root):
+                n += 1
                 yield str(field(label, "전사정보", "LabelText"))
+            if n == 0:
+                sys.exit(f"라벨(.json)을 못 찾았습니다: {root}")
+            print(f"라벨 {n}개: {root}", file=sys.stderr)
         for path in args.plain or []:
-            with open(path, encoding="utf-8") as f:
+            # 메모장 등이 맨 앞에 붙이는 BOM 을 벗긴다(utf-8-sig).
+            with open(path, encoding="utf-8-sig") as f:
                 yield from f
 
     seen = set()
@@ -355,7 +375,7 @@ def cmd_text(args):
         text, _ = normalize(raw)
         if text is None or text in seen:
             continue
-        if text in exclude:
+        if sentence_key(text) in exclude:
             dropped += 1
             continue
         seen.add(text)
@@ -369,14 +389,12 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("inspect", help="라벨의 전사 표기를 센다")
-    p.add_argument("--labels", action="append", help="라벨 폴더(하위 폴더까지) 또는 라벨 zip (여러 번 줄 수 있음)")
-    p.add_argument("--plain", action="append", help="한 줄에 한 문장인 텍스트 파일 (진료 대화를 받아 적은 것 등)")
+    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
     p.add_argument("--examples", type=int, default=5, help="항목마다 보여줄 예시 수")
     p.set_defaults(func=cmd_inspect)
 
     p = sub.add_parser("prep", help="Kaldi 데이터 폴더를 만든다")
-    p.add_argument("--labels", action="append", help="라벨 폴더(하위 폴더까지) 또는 라벨 zip (여러 번 줄 수 있음)")
-    p.add_argument("--plain", action="append", help="한 줄에 한 문장인 텍스트 파일 (진료 대화를 받아 적은 것 등)")
+    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
     p.add_argument("--audio", required=True, help="원천데이터(.wav) 폴더")
     p.add_argument("--out", required=True)
     p.add_argument("--rate", type=int, default=16000)

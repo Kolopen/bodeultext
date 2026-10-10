@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,7 +39,11 @@ import tempfile
 import wave
 from pathlib import Path
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    sys.exit("numpy 가 없습니다. -AI 를 먼저 설치하세요 (다음단계.txt 의 [6-1]):\n"
+             "  pip3 install --break-system-packages -e ~/-AI[transcribe]")
 
 HERE = Path(__file__).resolve().parent
 S5 = HERE.parent
@@ -81,10 +86,14 @@ def default_graph():
 
 
 def default_lmwt(graph):
-    """평가 때 가장 좋았던 언어모델 가중치. 그래프에 맞는 평가 결과를 찾는다."""
+    """평가 때 가장 좋았던 언어모델 가중치. 그래프에 맞는 평가 결과를 찾는다.
+
+    그래프 폴더 안의 best_cer 를 먼저 본다. 모델을 다른 곳으로 옮길 때 같이 복사해
+    두면(다음단계.txt [10]) 거기서도 같은 값을 쓴다.
+    """
     decode = "decode_test_big" if graph.name == "graph_big" else "decode_test"
-    for name in ("best_cer", "best_wer"):
-        best = S5 / "exp/chain/tdnn1a" / decode / "scoring_kaldi" / name
+    scoring = S5 / "exp/chain/tdnn1a" / decode / "scoring_kaldi"
+    for best in (graph / "best_cer", graph / "best_wer", scoring / "best_cer", scoring / "best_wer"):
         if best.is_file():
             found = re.search(r"_(\d+)_([\d.]+)\s*$", best.read_text().strip())
             if found:
@@ -149,11 +158,14 @@ def vad_turns(audio, vad_model, rate, max_speech):
     return turns
 
 
-def split_pauses(samples, rate, min_pause):
-    """쉬는 틈에서 끊어 말소리 구간 (시작, 끝) 목록을 돌려준다. 모델 없이 소리 크기로만 본다.
+def split_pauses(samples, rate, min_pause, keep=0.3):
+    """쉬는 틈에서 끊어 (시작, 끝) 목록을 돌려준다. 모델 없이 소리 크기로만 본다.
 
     학습 데이터가 한 문장씩 읽은 녹음이라 언어모델도 문장 단위로 배웠다. 여러
     문장을 한 덩어리로 넣거나 문장 한가운데를 자르면 그 자리에서 틀린다.
+    쉬는 틈은 양쪽에 keep 초씩 남기고 그보다 긴 가운데만 건너뛴다(긴 무음에서는
+    모델이 없는 말을 지어내기 쉽다). 잡음이 큰 녹음에서는 작게 말한 사람의 소리가
+    쉬는 틈으로 보일 수 있으므로 기준을 낮게 잡고, 짧은 틈은 버리지 않는다.
     """
     hop, win = rate // 100, rate * 25 // 1000
     n = (len(samples) - win) // hop
@@ -162,24 +174,33 @@ def split_pauses(samples, rate, min_pause):
     power = np.array([np.mean(samples[i * hop:i * hop + win] ** 2) for i in range(n)])
     db = 10 * np.log10(power + 1e-10)
     floor, peak = np.percentile(db, 10), np.percentile(db, 95)
-    speech = db > floor + max(6.0, 0.3 * (peak - floor))
-    pad, need = 15, int(min_pause * 100)
-    spans, start, quiet = [], None, 0
-    for i, on in enumerate(speech):
-        if on:
-            if start is None:
-                start = i
-            quiet = 0
-        elif start is not None:
-            quiet += 1
-            if quiet >= need:
-                spans.append((start, i - quiet + 1))
-                start = None
-    if start is not None:
-        spans.append((start, n))
-    if not spans:
+    # 잡음이 커서 말소리와 차이가 작을수록 기준을 낮춰 덜 끊는다.
+    speech = db > floor + min(6.0, 0.3 * (peak - floor))
+    if not speech.any():
         return [(0, len(samples))]
-    return [(max(0, (a - pad) * hop), min(len(samples), (b + pad) * hop + win)) for a, b in spans]
+    need, k = int(min_pause * 100), int(keep * 100)
+    voiced = np.flatnonzero(speech)
+    first, last = int(voiced[0]), int(voiced[-1]) + 1
+    spans, start, quiet_from = [], max(0, first - k), None
+    for i in range(first, last):
+        if not speech[i]:
+            if quiet_from is None:
+                quiet_from = i
+            continue
+        if quiet_from is not None and i - quiet_from >= need:
+            if i - quiet_from <= 2 * k:  # 짧은 틈은 한가운데서 끊는다
+                mid = (quiet_from + i) // 2
+                spans.append((start, mid))
+                start = mid
+            else:
+                spans.append((start, quiet_from + k))
+                start = i - k
+        quiet_from = None
+    end = len(samples) if last + k >= n else (last + k) * hop + win
+    bounds = [(a * hop, b * hop) for a, b in spans] + [(start * hop, end)]
+    if first - k <= 0:
+        bounds[0] = (0, bounds[0][1])
+    return bounds
 
 
 def write_wav(path, samples, rate):
@@ -203,13 +224,17 @@ def decode(utts, args, tmp, env):
     fsf = (model / "frame_subsampling_factor").read_text().strip() \
         if (model / "frame_subsampling_factor").is_file() else "1"
     lmwt, wip = args.lmwt
-    weighting = ""
+    q = shlex.quote
+    weighting, online_mode = "", "false"
     if args.silence_weight < 1.0:
         # 쉬는 소리는 목소리 특징(i-vector)을 잴 때 덜 센다. Kaldi 기본은 끔(1.0).
+        # 어디가 쉬는 소리인지는 인식이 진행되며 알게 되므로 조금씩(--online=true)
+        # 넣어야 한다. 한 번에 넣으면 모든 소리가 쉬는 소리로 셈해진다.
         sil = (graph / "phones/silence.csl").read_text().strip()
         weighting = (f"--ivector-silence-weighting.silence-weight={args.silence_weight} "
                      f"--ivector-silence-weighting.silence-phones={sil} "
                      f"--ivector-silence-weighting.max-state-duration=40 ")
+        online_mode = "true"
     nj = max(1, min(args.nj, len(utts)))
     jobs = []
     for j in range(nj):
@@ -217,26 +242,29 @@ def decode(utts, args, tmp, env):
         d = tmp / f"job{j}"
         d.mkdir()
         (d / "wav.scp").write_text("".join(f"{u} {p}\n" for u, _, p in part))
+        log = q(str(d / "decode.log"))
         spk2utt = {}
         for u, s, _ in part:
             spk2utt.setdefault(s, []).append(u)
         (d / "spk2utt").write_text("".join(f"{s} {' '.join(us)}\n" for s, us in sorted(spk2utt.items())))
         cmd = (
-            f"online2-wav-nnet3-latgen-faster --online=false --do-endpointing=false "
-            f"--frame-subsampling-factor={fsf} --config={online} {weighting}"
+            f"online2-wav-nnet3-latgen-faster --online={online_mode} --do-endpointing=false "
+            f"--frame-subsampling-factor={fsf} {q('--config=' + str(online))} {weighting}"
             f"--max-active={args.max_active} --beam={args.beam} --lattice-beam=6.0 "
-            f"--acoustic-scale=1.0 {model}/final.mdl {graph}/HCLG.fst "
-            f"ark:{d}/spk2utt scp:{d}/wav.scp ark:- 2> {d}/decode.log | "
-            f"lattice-scale --acoustic-scale={POST_DECODE_ACWT / lmwt} ark:- ark:- 2>> {d}/decode.log | "
-            f"lattice-add-penalty --word-ins-penalty={wip} ark:- ark:- 2>> {d}/decode.log | "
-            f"lattice-best-path ark:- ark,t:{d}/words.int 2>> {d}/decode.log"
+            f"--acoustic-scale=1.0 {q(str(model / 'final.mdl'))} {q(str(graph / 'HCLG.fst'))} "
+            f"{q(f'ark:{d}/spk2utt')} {q(f'scp:{d}/wav.scp')} ark:- 2> {log} | "
+            f"lattice-scale --acoustic-scale={POST_DECODE_ACWT / lmwt} ark:- ark:- 2>> {log} | "
+            f"lattice-add-penalty --word-ins-penalty={wip} ark:- ark:- 2>> {log} | "
+            f"lattice-best-path ark:- {q(f'ark,t:{d}/words.int')} 2>> {log}"
         )
         jobs.append((d, subprocess.Popen(["bash", "-c", "set -o pipefail; " + cmd], env=env)))
     result = {}
     for d, proc in jobs:
         if proc.wait() != 0:
-            log = (d / "decode.log").read_text(errors="replace")
-            sys.exit(f"Kaldi 인식이 실패했습니다. 로그 끝부분:\n{log[-2000:]}")
+            path = d / "decode.log"
+            log = path.read_text(errors="replace") if path.is_file() else "(로그가 없습니다)"
+            errors = "\n".join(l for l in log.splitlines() if "ERROR" in l or "Usage" in l)
+            sys.exit(f"Kaldi 인식이 실패했습니다.\n{errors[:1500]}\n로그 끝부분:\n{log[-1500:]}")
         for line in (d / "words.int").read_text().splitlines():
             parts = line.split()
             if parts:
@@ -313,6 +341,12 @@ def main():
     audio = vt.load_audio(args.audio)
     print(f"오디오 {len(audio) / rate:.1f}초를 읽었습니다.")
 
+    if args.segmentation or args.vad:
+        try:
+            import sherpa_onnx  # noqa: F401
+        except ImportError:
+            sys.exit("화자분리·VAD 에 쓰는 sherpa-onnx 가 없습니다 (다음단계.txt 의 [6-1]):\n"
+                     "  pip3 install --break-system-packages -e ~/-AI[transcribe]")
     if args.segmentation:
         print("화자를 나누는 중입니다...")
         turns = vt.diarize(audio, segmentation_model=args.segmentation, embedding_model=args.embedding,
@@ -364,13 +398,17 @@ def main():
             w, i = line.split()
             words[i] = w
         chunks = []
+        empty = 0
         for n, (speaker, start, end, _) in enumerate(pieces):
             spk = re.sub(r"\W", "_", speaker) if speaker else f"u{n:05d}"
             raw = to_text(hyps.get(f"{spk}-{n:05d}", []), words)
             if not raw:
+                empty += 1
                 continue
             chunks.append({"index": len(chunks), "speaker": speaker, "start_ms": start,
                            "end_ms": end, "raw_text": raw, "text": itn(raw)})
+        if empty:
+            print(f"{empty}구간은 받아 적은 말이 없어 뺐습니다 (쉬는 소리, 기침, 잡음 등).")
         if args.manager:
             chunks = vt._mark_manager(audio, turns, chunks, args.manager, args.embedding, args.threads)
     finally:

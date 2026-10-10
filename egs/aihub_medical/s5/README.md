@@ -280,7 +280,7 @@ local/report_audio.sh /mnt/e/녹음/0102.m4a 내과 2026-10-02
 | `local/transcribe_kaldi.py` | 받아 적기만. -AI `voice-transcribe` 와 같은 JSON 을 낸다 |
 | `local/korean_itn.py` | 한글 수 → 숫자 (`--test` 로 자체 점검) |
 | `local/expand_lm.sh` | 언어모델 넓히기 |
-| `local/stop_training.sh` | 돌고 있는 학습 멈추기 |
+| `local/stop_training.sh` | 돌고 있는 학습 멈추기 (`--list` 는 보기만) |
 
 ## 다 쓰고 지우기
 
@@ -290,6 +290,7 @@ local/report_audio.sh /mnt/e/녹음/0102.m4a 내과 2026-10-02
 mkdir -p /mnt/e/kaldi-model
 cd ~/bodeultext/egs/aihub_medical/s5
 cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph exp/chain/tree/graph_big /mnt/e/kaldi-model/
+cp exp/chain/tdnn1a/decode_test/scoring_kaldi/best_cer /mnt/e/kaldi-model/graph/
 ```
 
 **② 리눅스 통째로 삭제** — 관리자 PowerShell

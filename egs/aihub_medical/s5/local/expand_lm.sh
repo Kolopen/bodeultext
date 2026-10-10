@@ -122,6 +122,8 @@ if [ $stage -le 4 ] && $decode; then
       --online-ivector-dir exp/nnet3/ivectors_test_hires \
       $graph data/test_hires $chain_dir/decode_test_big
     old=$chain_dir/decode_test new=$chain_dir/decode_test_big
+    # 녹음 인식이 이 그래프에 맞는 언어모델 가중치를 쓰도록 그래프 옆에 둔다.
+    cp $new/scoring_kaldi/best_cer $new/scoring_kaldi/best_wer $graph/ 2>/dev/null || true
   else
     steps/decode_fmllr.sh --nj $(nj_of data/test) --cmd "$decode_cmd" --config conf/decode.config \
       $graph data/test exp/tri3/decode_test_big
