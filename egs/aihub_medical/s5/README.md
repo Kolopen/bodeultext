@@ -17,6 +17,9 @@ data/train, data/test
 [GPU] TDNN-F 신경망 (chain)                  run.sh 10 단계 = local/chain/run_tdnn.sh
    ▼
 exp/chain/tdnn1a_online/  실제 녹음 인식에 쓰는 모델 묶음
+   │ local/report_audio.sh       녹음 -> 받아 적기 -> -AI 리포트 (9절)
+   ▼
+녹음이름/report.txt
 ```
 
 ## 왜 Whisper 대신 Kaldi 인가
@@ -207,10 +210,12 @@ tail -f run.log            # 진행 보기. Ctrl+C 는 보기만 멈추고 학�
 
 시간은 노트북 CPU 와 데이터 양에 따라 크게 다르다. 처음 돌릴 때 재 두면 다음 계획이 쉽다.
 
-**멈췄다 이어 하기.** Ubuntu 창을 닫거나 노트북을 써야 하면 `Ctrl+C` 로 멈춘다.
+**멈췄다 이어 하기.** `nohup ... &` 로 띄운 학습은 `Ctrl+C` 로 멈추지 않는다.
+`local/stop_training.sh` 가 딸린 작업까지 통째로 멈춘다. 자세한 것은 **`다음단계.txt`**.
 
 ```bash
-./run.sh --stage 7 ...                       # GMM 은 단계 번호로 (run.sh 맨 위 참고)
+local/stop_training.sh                                # 멈추기
+./run.sh --stage 7 ...                                # GMM 은 단계 번호로 (run.sh 맨 위 참고)
 local/chain/run_tdnn.sh --stage 12 --train-stage 37   # 신경망은 반복 번호로
 ```
 
@@ -239,14 +244,52 @@ local/chain/run_tdnn.sh --stage 12 --train-stage 37   # 신경망은 반복 번�
 겹칠 수 있어 점수가 실제보다 좋게 나온다. 진짜 성능은 **-AI 의 실제 진료 녹음**으로
 whisper turbo 와 같은 기준(검사 수치, 의료 용어, 지어낸 문장 수)으로 재야 한다.
 
-## 다 쓰고 지우기
+## 8. 언어모델 넓히기 (신경망이 끝난 뒤)
 
-**① 남길 것 먼저 복사** (Ubuntu 안에서, 외장 SSD 가 `D:` 일 때). 수백 MB 다.
+언어모델은 음성을 받은 발화의 문장만 안다. 라벨에만 있는 문장, 의료 용어, 직접 모은
+문장(`--plain`)으로 사전과 언어모델을 다시 만들고 그래프만 새로 짠다. 평가 문장은 뺀다.
 
 ```bash
-mkdir -p /mnt/d/kaldi-model
+nohup local/expand_lm.sh --nj 4 --data-root /mnt/e/aihub > expand_lm.log 2>&1 &
+```
+
+끝에 전/후 CER 을 나란히 보여 준다. 나아졌으면 `exp/chain/tree/graph_big` 을 그대로 두고
+(녹음 인식이 알아서 쓴다), 나빠졌으면 지운다.
+
+## 9. 실제 녹음 → 리포트
+
+```bash
+pip3 install --break-system-packages -e ~/-AI[transcribe]     # 한 번만
+local/report_audio.sh /mnt/e/녹음/0102.m4a 내과 2026-10-02
+```
+
+```
+녹음 -> 화자분리, 잡음 걷기 (-AI) -> 쉬는 틈에서 문장 길이로 자르기
+     -> Kaldi 인식 (tdnn1a_online + graph_big) -> "+이" 조각 붙이기 -> "백사십" -> 140
+     -> transcript.json -> -AI voice-analyze -> report.txt
+```
+
+결과는 녹음 옆 같은 이름 폴더(`/mnt/e/녹음/0102/`)에 `transcript.txt`, `report.txt` 로 생긴다.
+리포트는 -AI 와 같은 모양이다([검사 수치], [진단·소견], [생활 지도], 리포트 초안의 [진료 내용],
+[약품], [복용 방법], [처방 기간], 각 줄에 `[00:09]` 시각). 화자분리 모델 받기, 옵션, 문제가
+생겼을 때는 **`다음단계.txt` [6]~[9]**.
+
+| 파일 | 하는 일 |
+|---|---|
+| `local/report_audio.sh` | 녹음 하나 → 받아 적기 → 리포트 (보통 이것만 쓴다) |
+| `local/transcribe_kaldi.py` | 받아 적기만. -AI `voice-transcribe` 와 같은 JSON 을 낸다 |
+| `local/korean_itn.py` | 한글 수 → 숫자 (`--test` 로 자체 점검) |
+| `local/expand_lm.sh` | 언어모델 넓히기 |
+| `local/stop_training.sh` | 돌고 있는 학습 멈추기 |
+
+## 다 쓰고 지우기
+
+**① 남길 것 먼저 복사** (Ubuntu 안에서). 수백 MB 다. graph_big 은 8절을 했을 때만 있다.
+
+```bash
+mkdir -p /mnt/e/kaldi-model
 cd ~/bodeultext/egs/aihub_medical/s5
-cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph data/lang_test /mnt/d/kaldi-model/
+cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph exp/chain/tree/graph_big /mnt/e/kaldi-model/
 ```
 
 **② 리눅스 통째로 삭제** — 관리자 PowerShell
@@ -254,7 +297,7 @@ cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph data/lang_test /mnt/d/kaldi-
 ```powershell
 wsl --shutdown
 wsl --unregister Ubuntu-24.04      # Kaldi, CUDA, 데이터, 학습 결과 전부 삭제
-Remove-Item -Recurse -Force D:\wsl    # 남은 빈 폴더
+Remove-Item -Recurse -Force E:\wsl    # 남은 빈 폴더
 Remove-Item $env:USERPROFILE\.wslconfig   # 메모리 설정 파일
 ```
 
@@ -286,6 +329,5 @@ cd ../src && ./configure --shared && make depend -j 8 && make -j 8
 
 ## 다음 작업
 
-1. 실제 진료 녹음 하나를 인식하는 스크립트 (긴 녹음을 잘라 디코딩)
-2. 한글 숫자 → 아라비아 숫자 후처리 ("이백 십 육" → 216)
-3. -AI 녹음으로 whisper turbo 와 맞대기
+1. -AI 녹음으로 whisper turbo 와 맞대기 (검사 수치, 의료 용어, 지어낸 문장 수)
+2. 실제 진료 녹음 일부를 받아 적어 학습 데이터에 더하기 (낭독체 → 대화체 적응)

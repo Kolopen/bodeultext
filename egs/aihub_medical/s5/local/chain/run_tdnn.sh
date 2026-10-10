@@ -30,6 +30,7 @@ num_epochs=4
 minibatch=128,64        # GPU 메모리가 모자라면 64,32 로 줄인다.
 remove_egs=true
 egs_extra=              # 시험용 소량 데이터면 "--num-utts-subset 50"
+ubm_gauss=512           # 시험용 소량 데이터면 32
 
 . ./cmd.sh
 . ./path.sh
@@ -44,7 +45,7 @@ fi
 nj_of() { local n; n=$(wc -l < $1/spk2utt); echo $(( n < nj ? n : nj )); }
 
 local/nnet3/run_ivector_common.sh --stage $stage --nj $nj --train-set $train_set \
-  --test-sets "$test_sets" --gmm $gmm --speed-perturb $speed_perturb
+  --test-sets "$test_sets" --gmm $gmm --speed-perturb $speed_perturb --ubm-gauss $ubm_gauss
 
 $speed_perturb && train_set=${train_set}_sp
 ali_dir=exp/${gmm}_ali_${train_set}

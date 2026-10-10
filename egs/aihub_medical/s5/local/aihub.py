@@ -327,18 +327,56 @@ def cmd_prep(args):
         print(f"  뺀 발화: {reason} {n}개")
 
 
+def cmd_text(args):
+    """라벨에 있는 문장을 정규화해서 한 줄에 하나씩, 중복 없이 내놓는다.
+
+    언어모델을 넓히는 데 쓴다. 음성을 받지 않은 라벨의 문장도 쓸 수 있다.
+    --plain 으로 직접 모은 문장 파일도 같은 규칙으로 정리해 함께 넣는다.
+    --exclude 의 Kaldi text 에 있는 문장(평가 문장)은 뺀다. 빼지 않으면 언어모델이
+    평가 문장을 미리 알게 되어 점수가 실제보다 좋게 나온다.
+    """
+    if not (args.labels or args.plain):
+        sys.exit("--labels 나 --plain 을 하나 이상 주세요.")
+    exclude = set()
+    for path in args.exclude or []:
+        with open(path, encoding="utf-8") as f:
+            exclude.update(line.split(maxsplit=1)[1].strip() for line in f if " " in line.strip())
+    def sentences():
+        for root in args.labels or []:
+            for path, label in iter_labels(root):
+                yield str(field(label, "전사정보", "LabelText"))
+        for path in args.plain or []:
+            with open(path, encoding="utf-8") as f:
+                yield from f
+
+    seen = set()
+    dropped = 0
+    for raw in sentences():
+        text, _ = normalize(raw)
+        if text is None or text in seen:
+            continue
+        if text in exclude:
+            dropped += 1
+            continue
+        seen.add(text)
+        sys.stdout.write(text + "\n")
+    print(f"문장 {len(seen)}개 (평가 문장이라 뺀 것 {dropped}개)", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("inspect", help="라벨의 전사 표기를 센다")
-    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
+    p.add_argument("--labels", action="append", help="라벨 폴더(하위 폴더까지) 또는 라벨 zip (여러 번 줄 수 있음)")
+    p.add_argument("--plain", action="append", help="한 줄에 한 문장인 텍스트 파일 (진료 대화를 받아 적은 것 등)")
     p.add_argument("--examples", type=int, default=5, help="항목마다 보여줄 예시 수")
     p.set_defaults(func=cmd_inspect)
 
     p = sub.add_parser("prep", help="Kaldi 데이터 폴더를 만든다")
-    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
+    p.add_argument("--labels", action="append", help="라벨 폴더(하위 폴더까지) 또는 라벨 zip (여러 번 줄 수 있음)")
+    p.add_argument("--plain", action="append", help="한 줄에 한 문장인 텍스트 파일 (진료 대화를 받아 적은 것 등)")
     p.add_argument("--audio", required=True, help="원천데이터(.wav) 폴더")
     p.add_argument("--out", required=True)
     p.add_argument("--rate", type=int, default=16000)
@@ -349,6 +387,12 @@ def main():
     p.add_argument("--min-unseen", type=int, default=200,
                    help="뺀 뒤 이보다 적으면 빼지 않고 전체를 쓴다")
     p.set_defaults(func=cmd_prep)
+
+    p = sub.add_parser("text", help="라벨의 문장을 중복 없이 내놓는다 (언어모델용)")
+    p.add_argument("--labels", action="append", help="라벨 폴더(하위 폴더까지) 또는 라벨 zip (여러 번 줄 수 있음)")
+    p.add_argument("--plain", action="append", help="한 줄에 한 문장인 텍스트 파일 (진료 대화를 받아 적은 것 등)")
+    p.add_argument("--exclude", action="append", help="이 Kaldi text 의 문장은 뺀다 (여러 번 줄 수 있음)")
+    p.set_defaults(func=cmd_text)
 
     args = parser.parse_args()
     args.func(args)

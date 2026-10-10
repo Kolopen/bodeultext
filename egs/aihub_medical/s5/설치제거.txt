@@ -162,8 +162,10 @@ df -h /mnt/e
 [10] 컴퓨터를 끌 때 / 다시 켤 때
 ------------------------------------------------------------
 끌 때:
-  1. Ubuntu 창에서 돌고 있는 명령이 있으면 끝날 때까지 기다리거나 Ctrl+C 로 멈춘다.
-     (unpack_aihub.py, run.sh 는 다시 실행하면 이어서 한다)
+  1. 돌고 있는 명령이 있으면 끝날 때까지 기다리거나 멈춘다.
+     - 창에 바로 띄운 명령(unpack_aihub.py 등): Ctrl+C
+     - nohup ... & 로 띄운 학습(run.sh, run_tdnn.sh): local/stop_training.sh
+     (다시 실행하면 이어서 한다. 학습을 이어 하는 법은 다음단계.txt 의 [3])
   2. Ubuntu 창에서:  exit
   3. PowerShell 에서: wsl --shutdown
   4. Windows 를 평소처럼 끈다.
@@ -179,8 +181,7 @@ df -h /mnt/e
   4. 하던 단계부터 이어서 한다.
      - 데이터 꺼내기: 같은 unpack_aihub.py 명령을 다시 (끝난 파일은 건너뜀)
      - 학습: ./run.sh --stage N ...  (N 은 멈춘 단계, run.sh 맨 위 참고)
-     - 신경망: local/chain/run_tdnn.sh --stage 12 --train-stage M
-       (M 은 exp/chain/tdnn1a/ 안의 가장 큰 숫자.mdl 의 숫자)
+     - 신경망: 다음단계.txt 의 [3] (단계 번호 표가 있다)
 
 
 ############################################################
@@ -193,7 +194,8 @@ df -h /mnt/e
 
 mkdir -p /mnt/e/kaldi-model
 cd ~/bodeultext/egs/aihub_medical/s5
-cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph data/lang_test /mnt/e/kaldi-model/
+cp -rL exp/chain/tdnn1a_online exp/chain/tree/graph exp/chain/tree/graph_big /mnt/e/kaldi-model/
+(graph_big 은 언어모델 넓히기를 했을 때만 있다. 없으면 빼고 복사한다.)
 
 
 [2] 이름 확인  -  관리자 PowerShell
