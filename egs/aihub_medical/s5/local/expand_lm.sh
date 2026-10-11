@@ -41,7 +41,8 @@ set -euo pipefail
 
 if [ -n "$data_root" ] && [ -z "$labels" ]; then
   for d in $data_root/train/labels $data_root/valid/labels; do
-    [ -e $d ] && labels="$labels $d"
+    [ -e $d ] || { echo "$0: 없는 경로입니다: $d (--data-root 를 확인하세요)" >&2; exit 1; }
+    labels="$labels $d"
   done
 fi
 if [ -z "$labels$plain" ]; then

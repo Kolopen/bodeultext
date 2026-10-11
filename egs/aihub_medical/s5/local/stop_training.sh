@@ -59,6 +59,8 @@ targets() {
       [ "$g" = "$p" ] && pgrep -g "$g"
     done
     for p in $(pgrep -f "$workers"); do
+      # 녹음 인식(report_audio.sh)도 이 폴더에서 nnet3 프로그램을 돌린다. 학습이 아니다.
+      case "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" in *online2-wav-*) continue ;; esac
       in_here "$p" && echo "$p"
     done
   } | sort -un | while read -r p; do
