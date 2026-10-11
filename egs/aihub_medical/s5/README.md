@@ -222,7 +222,8 @@ local/chain/run_tdnn.sh --stage 12 --train-stage 37   # 신경망은 반복 번�
 신경망은 반복마다 모델을 저장한다. 이어 할 번호는 `exp/chain/tdnn1a/` 안의 가장 큰
 `N.mdl` 의 N 이다.
 
-**GPU 메모리가 모자라면**(`out of memory`) `local/chain/run_tdnn.sh --stage 12 --minibatch 64,32`.
+**GPU 메모리가 모자라면**(`out of memory`) `local/chain/run_tdnn.sh --stage 12 --train-stage M --minibatch 64,32`
+(M 은 `exp/chain/tdnn1a/` 의 가장 큰 `N.mdl` 의 N, 없으면 `--train-stage` 를 뺀다).
 
 **노트북 관리.** 충전기를 꽂고, 통풍되는 곳(쿨링패드)에 둔다. GPU 85°C 이하는 정상이다.
 제조사 앱에 배터리 충전 80% 제한이 있으면 켜 둔다. 학습은 GPU 를 닳게 하지 않는다.
@@ -297,8 +298,9 @@ cp exp/chain/tdnn1a/decode_test/scoring_kaldi/best_cer /mnt/e/kaldi-model/graph/
 
 ```powershell
 wsl --shutdown
-wsl --unregister Ubuntu-24.04      # Kaldi, CUDA, 데이터, 학습 결과 전부 삭제
+wsl --unregister Ubuntu-24.04      # Kaldi, CUDA, 학습 결과 전부 삭제
 Remove-Item -Recurse -Force E:\wsl    # 남은 빈 폴더
+Remove-Item -Recurse -Force E:\aihub  # AI-Hub 음성·라벨 (WSL 밖에 있다)
 Remove-Item $env:USERPROFILE\.wslconfig   # 메모리 설정 파일
 ```
 

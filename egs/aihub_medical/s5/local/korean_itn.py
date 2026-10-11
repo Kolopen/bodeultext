@@ -75,12 +75,13 @@ PARTICLES = ["이", "가", "은", "는", "을", "를", "에", "에서", "에게"
 # 붙고("구십이고"), 모음 뒤에는 빠진다("구십이고" 의 '구십이' + '고").
 _FINAL = ["요", "고", "고요", "니까", "니까요", "라", "라고", "라고요", "라서", "라서요",
           "라면", "면", "면요", "며", "네", "네요", "죠", "지", "지요", "야", "거든요",
-          "던데", "던데요", "구요", "든지"]
+          "던데", "던데요", "구요", "든지", "지만", "잖아", "잖아요", "더라고요", "더라구요",
+          "래요", "라는", "길래", "어서"]
 _PAST = ["어요", "어", "고", "고요", "는데", "는데요", "거든요", "습니다", "죠", "지요",
-         "네요", "다"]
+         "네요", "다", "다가", "으니까"]
 _HONOR = ["고", "고요", "죠", "네요", "면", "니까", "는데", "는데요", "지요"]
 ENDINGS = (["예요", "이에요", "입니다", "입니까", "인데", "인데요", "인가요", "인지", "이다",
-            "이세요", "세요", "이셨어요", "셨어요"]
+            "이세요", "세요", "이셨어요", "셨어요", "이셨는데", "셨는데", "이랬는데", "랬는데"]
            + [s + f for s in ("이", "") for f in _FINAL]
            + [s + f for s in ("이었", "였") for f in _PAST]
            + [s + f for s in ("이시", "시") for f in _HONOR])
@@ -173,6 +174,23 @@ def week(counter, following):
     return counter
 
 
+INTERVAL_RE = re.compile(r"(?:(?:정도|쯤|가량)\s*)?(?:뒤|후|있다가|지나|만에)")
+
+
+def interval_ahead(counter, following):
+    """'삼 개월 정도 후에', '이 주쯤 지나서', '일주일 있다가'처럼 다음 방문까지의 간격이면 True.
+
+    -AI 는 'N주 뒤'처럼 단위 바로 뒤의 뒤·후만 간격으로 알아보고, 나머지는 처방 기간으로
+    잘못 올린다. 한글로 두면 처방 기간으로 읽지 않는다.
+    """
+    m = re.match(r"주일|주|개월|년|달", counter)
+    if not m:
+        return False
+    rest = counter[m.end():]
+    text = " ".join(([rest] if rest else []) + list(following[:2]))
+    return bool(INTERVAL_RE.match(text)) and not re.match(r"뒤|후", text)
+
+
 def round_alt(num, suffix, nxt):
     """끝의 '이'를 조사나 '이다'로 읽을 수 있으면 딱 떨어지는 쪽을 돌려준다."""
     head = num[:-1]
@@ -197,7 +215,7 @@ def read_number(tokens, i):
     while k < len(tokens):
         tok = tokens[k]
         # 띄어 쓴 '일'은 날짜·기간 단위로 본다. "이십 일" -> 20일
-        if k > i and tok.startswith("일"):
+        if k > i and (tok.startswith("일") or tok.startswith("사이")):  # "백사십 사이로"
             break
         for cut in range(len(tok), 0, -1):
             part, suffix = tok[:cut], tok[cut:]
@@ -236,11 +254,21 @@ def read_fraction(tokens, k):
     """소수점 뒤의 숫자들. "점 이 오 밀리" -> ("25", "", 다음 위치)"""
     digits, tail = "", ""
     while k < len(tokens):
-        m = DIGITS_ONLY_RE.fullmatch(tokens[k])
+        tok = tokens[k]
+        nxt = tokens[k + 1] if k + 1 < len(tokens) else ""
+        # "점 오 사이예요"(사이), "점 오 일 년 전"(일 년): 소수가 아니라 다음 말이다
+        if digits and (tok.startswith("사이")
+                       or (tok in ("일", "이") and (nxt.startswith("정도") or counter_of(tok, nxt)))):
+            break
+        m = DIGITS_ONLY_RE.fullmatch(tok)
         if not m:
             break
-        digits += "".join(str(DIGITS[c]) for c in m.group(1))
-        tail = m.group(2)
+        d, t = m.group(1), m.group(2)
+        # "칠 점 일이에요"의 '이'는 '이다'다(7.1). 7.12 가 아니다.
+        if len(d) > 1 and d.endswith("이") and COPULA_RE.fullmatch("이" + t):
+            d, t = d[:-1], "이" + t
+        digits += "".join(str(DIGITS[c]) for c in d)
+        tail = t
         k += 1
         if tail:
             break
@@ -290,6 +318,18 @@ def convert(text):
         nxt = tokens[j] if j < len(tokens) else ""
         after = tokens[j + 1] if j + 1 < len(tokens) else ""
 
+        # 달 뒤의 한 자리 날짜: "시월 삼일에", "다음 달 칠 일에"
+        month_before = re.search(r"\d+월$", prev) or out[-2:] in (["다음", "달"], ["이번", "달"])
+        if month_before and len(num) == 1 and num in DIGITS and value(num):
+            if suffix.startswith("일"):
+                out.append(attach(value(num), suffix))
+                i = j
+                continue
+            if not suffix and nxt.startswith("일") and COUNTER_TOKEN_RE.fullmatch(nxt):
+                out.append(attach(value(num), nxt))
+                i = j + 1
+                continue
+
         # 어림: "오 육 개월", "일 이 년", "이삼 일" 의 뒤쪽 수는 바꾸지 않는다
         if len(num) == 1 and num in DIGITS and prev and all(c in DIGITS for c in prev):
             keep()
@@ -298,7 +338,7 @@ def convert(text):
 
         # 날짜·기간의 '일': "삼십일 치" -> 30일 치, "시월 이십일에" -> 10월 20일에
         if (len(num) >= 2 and num.endswith("일") and num[-2] in UNITS
-                and not nxt.startswith("일")):
+                and not nxt.startswith("일") and not suffix.startswith("일")):
             if (DAY_MARK_RE.match(suffix) or (not suffix and DAY_MARK_RE.match(nxt) and nxt != "간")
                     or (MONTH_RE.search(prev) and value(num[:-1]) <= 31)):
                 out.append(attach(value(num[:-1]), "일" + suffix))
@@ -310,6 +350,12 @@ def convert(text):
                 i += 1
                 continue
 
+        # 나이대("사십 대신데", "삼십대인데")는 그대로 둔다. -AI 가 검사 수치로 잡는다.
+        if (suffix or nxt).startswith("대"):
+            keep()
+            i += 1
+            continue
+
         alt = round_alt(num, suffix, nxt)
         if alt:
             num, suffix = alt
@@ -319,7 +365,8 @@ def convert(text):
             digits, tail, k = read_fraction(tokens, j + 1)
             if digits:
                 unit = tokens[k] if k < len(tokens) else ""
-                if not tail and unit and not NOT_COUNTER_RE.match(unit) and COUNTER_TOKEN_RE.fullmatch(unit):
+                if (not tail and unit and not all(c in DIGITS for c in unit)
+                        and not NOT_COUNTER_RE.match(unit) and COUNTER_TOKEN_RE.fullmatch(unit)):
                     tail, k = unit, k + 1  # "영 점 오 밀리" -> 0.5밀리
                 out.append(attach(f"{value(num)}.{digits}", tail))
                 i = k
@@ -336,6 +383,10 @@ def convert(text):
             continue
 
         counter = counter_of(num, nxt) if not suffix else None
+        if counter and interval_ahead(nxt, tokens[j + 1:j + 3]):
+            keep()
+            i += 1
+            continue
         if counter:
             out.append(attach(value(num), week(nxt, after)))
             i = j + 1
@@ -349,6 +400,10 @@ def convert(text):
 
         if (strong(num) or (alt and num in UNITS)
                 or (suffix and ATTACHED_RE.fullmatch(suffix) and num + suffix[:1] != "이년")):
+            if interval_ahead(suffix, tokens[j:j + 2]):
+                keep()
+                i += 1
+                continue
             out.append(attach(value(num), week(suffix, nxt)))
             i = j
             continue
@@ -356,7 +411,7 @@ def convert(text):
         # 백·천 하나: 다른 수나 '이상' 앞에서만. "백에 육십" -> 100에 60 ('백'은 가방도 된다)
         if num in ("백", "천") and TAIL_RE.fullmatch(suffix):
             nf = read_number(tokens, j)
-            if (nf and strong(nf[0])) or re.match(r"이상|이하|미만|초과|넘", nxt):
+            if (nf and strong(nf[0])) or re.match(r"이상|이하|미만|초과|넘|사이", nxt):
                 out.append(attach(value(num), suffix))
                 i = j
                 continue
@@ -379,7 +434,22 @@ CASES = [
     ("이 주 뒤에 오세요", "2주 뒤에 오세요"),
     ("삼십 분 정도", "30분 정도"),
     ("사 점 정도 아파요", "4점 정도 아파요"),
-    ("이십대 여성", "20대 여성"),
+    ("이십대 여성", "이십대 여성"),
+    ("아직 사십 대신데 혈압이 높아요", "아직 사십 대신데 혈압이 높아요"),
+    ("당화혈색소가 칠 점 일이에요", "당화혈색소가 7.1이에요"),
+    ("육 점 오 일 년 전보다", "6.5 1년 전보다"),
+    ("체온이 삼십칠 점 오 사이예요", "체온이 37.5 사이예요"),
+    ("시월 이십일일에 오세요", "10월 21일에 오세요"),
+    ("시월 삼일에 오세요", "10월 3일에 오세요"),
+    ("다음 달 칠 일에 오세요", "다음 달 7일에 오세요"),
+    ("한 달 오일 드세요", "한 달 오일 드세요"),
+    ("혈압은 백이십에서 백사십 사이로", "혈압은 120에서 140 사이로"),
+    ("공복 혈당은 칠십에서 백 사이가 정상이에요", "공복 혈당은 70에서 100 사이가 정상이에요"),
+    ("삼 개월 정도 후에 다시 오세요", "삼 개월 정도 후에 다시 오세요"),
+    ("이 주쯤 지나서 오세요", "이 주쯤 지나서 오세요"),
+    ("일주일 있다가 오세요", "일주일 있다가 오세요"),
+    ("사 주 치 드릴게요", "4주 치 드릴게요"),
+    ("혈압이 백사십이지만 괜찮아요", "혈압이 140이지만 괜찮아요"),
     ("시월 이십 일에 오세요", "10월 20일에 오세요"),
     ("시월 이십일 일에", "10월 21일에"),
     ("시월 이십일에 오세요", "10월 20일에 오세요"),

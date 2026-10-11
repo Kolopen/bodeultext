@@ -326,7 +326,8 @@ def main():
     if args.manager and not args.segmentation:
         p.error("--manager 는 화자분리(--segmentation, --embedding)와 함께 씁니다.")
     args.graph = args.graph or default_graph()
-    args.lmwt = (args.lmwt, 0.0) if args.lmwt else default_lmwt(args.graph)
+    tuned = default_lmwt(args.graph)  # --lmwt 를 줘도 평가에서 고른 단어 삽입 벌점은 그대로 쓴다
+    args.lmwt = (args.lmwt, tuned[1]) if args.lmwt else tuned
     args.out = args.out or args.audio.with_suffix(".json")
     for f in (args.model / "final.mdl", args.model / "conf/online.conf", args.graph / "HCLG.fst",
               args.graph / "words.txt"):

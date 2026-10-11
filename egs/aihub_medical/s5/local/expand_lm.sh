@@ -45,6 +45,10 @@ if [ -n "$data_root" ] && [ -z "$labels" ]; then
     labels="$labels $d"
   done
 fi
+if [ -n "$plain" ] && [[ "$plain" == *" "* ]] && [ -e "$plain" ]; then
+  echo "$0: --plain 파일 이름에 띄어쓰기가 있으면 안 됩니다 (여러 파일을 띄어쓰기로 나눈다): $plain" >&2
+  exit 1
+fi
 if [ -z "$labels$plain" ]; then
   echo "$0: --data-root 나 --labels, --plain 을 알려주세요. 맨 위 사용법 참고." >&2
   exit 1

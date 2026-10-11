@@ -60,13 +60,16 @@ segmentation=$models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx
 embedding=$models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
 if [ -f "$segmentation" ] && [ -f "$embedding" ]; then
   opts+=(--segmentation "$segmentation" --embedding "$embedding" --speakers "$speakers")
-  [ -n "${VOICE_MANAGER:-}" ] && opts+=(--manager "$VOICE_MANAGER")
+  [ -n "${VOICE_MANAGER:-}" ] && opts+=(--manager "$(realpath "$VOICE_MANAGER")")
   echo "화자분리: 사용 (화자 $speakers 명)"
 elif [ -f "$models/silero_vad.onnx" ]; then
   opts+=(--vad "$models/silero_vad.onnx")
   echo "화자분리: 없음 (말소리 구간만 자름)"
 else
   echo "화자분리: 없음 ($models 에 모델이 없음. 다음단계.txt [6] 참고)"
+fi
+if [ -n "${VOICE_MANAGER:-}" ] && ! [ -f "$segmentation" ]; then
+  echo "VOICE_MANAGER 는 화자분리 모델(다음단계.txt [6-2])이 있어야 씁니다. 이번에는 무시합니다." >&2
 fi
 
 echo "결과 폴더: $out"

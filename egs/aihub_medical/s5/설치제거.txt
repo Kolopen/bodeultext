@@ -208,12 +208,14 @@ wsl -l -v
 
 [3] Ubuntu 삭제  -  관리자 PowerShell
 ------------------------------------------------------------
-!! Kaldi, CUDA, AI-Hub 데이터, 학습 결과가 전부 지워진다. 되돌릴 수 없다. !!
+!! Kaldi, CUDA, 학습 결과(WSL 안)와 E:\aihub 의 AI-Hub 데이터가 지워진다. 되돌릴 수 없다. !!
+   (E:\kaldi-model, E:\녹음 은 남는다)
 
 wsl --shutdown
 wsl --unregister Ubuntu-24.04
 Remove-Item -Recurse -Force E:\wsl
 Remove-Item -Recurse -Force E:\aihub-zip
+Remove-Item -Recurse -Force E:\aihub
 Remove-Item $env:USERPROFILE\.wslconfig
 
 
