@@ -11,7 +11,7 @@
    "파일정보": {"FileName": "PA_0322-2848-01-03-F-08-C.wav",
                 "DirectoryPath": "/nia/metrixB/data/PA_0322", "FileLength": "2.34"}}
 
-두 가지 일을 한다.
+하는 일:
 
   inspect  라벨만 보고 전사 표기를 센다. 음성을 받기 전에 돌린다.
            숫자·영문·기호가 얼마나 섞였는지 알아야 정규화 규칙을 정할 수 있다.
@@ -19,9 +19,13 @@
   prep     라벨과 음성을 짝지어 Kaldi 데이터 폴더를 만든다.
            (wav.scp, text, utt2spk, spk2gender, utt2dur)
 
+  coverage 다른 세트(간호사, 의사_2 ...)를 더 받으면 지금 학습한 글에 없던 문장·낱말이
+           얼마나 늘어나는지 라벨만으로 센다. 수백 GB 를 받기 전에 돌린다.
+
   python3 local/aihub.py inspect --labels /mnt/e/aihub/train/labels   (폴더, zip, 폴더 안의 zip)
   python3 local/aihub.py prep --labels .../labels/train --audio .../audio/train \\
       --out data/train
+  python3 local/aihub.py coverage --labels /mnt/e/aihub/train/labels --have data/train/text
 """
 
 import argparse
@@ -239,6 +243,65 @@ def cmd_inspect(args):
         print(f"[{name}] " + ", ".join(f"{k or '(없음)'}:{v}" for k, v in counter.most_common(12)))
 
 
+def cmd_coverage(args):
+    """다른 세트를 받으면 새로 배울 문장·낱말이 얼마나 되는지 화자 구분(PA, HA ...)마다 센다."""
+    have_keys, have_words, have_groups = set(), set(), collections.Counter()
+    for path in args.have:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                utt, _, text = line.strip().partition(" ")
+                if text:
+                    have_keys.add(sentence_key(text))
+                    have_words.update(text.split())
+                    have_groups[utt[:2]] += 1
+    if not have_keys:
+        sys.exit(f"지금 학습에 쓴 글이 비었습니다: {args.have}")
+
+    groups = collections.defaultdict(lambda: {"utts": 0, "sec": 0.0, "keys": set(), "new": set(),
+                                              "words": collections.Counter()})
+    for path, label in iter_labels(args.labels):
+        text, _ = normalize(str(field(label, "전사정보", "LabelText")))
+        if text is None:
+            continue
+        g = groups[utt_id_of(label, path)[:2]]
+        g["utts"] += 1
+        g["sec"] += seconds(label)
+        key = sentence_key(text)
+        g["keys"].add(key)
+        if key not in have_keys:
+            g["new"].add(key)
+            g["words"].update(w for w in text.split() if w not in have_words)
+    if not groups:
+        sys.exit(f"라벨(.json)을 못 찾았습니다: {args.labels}")
+
+    print(f"지금 학습에 쓴 글: 발화 {sum(have_groups.values())}개, 서로 다른 문장 {len(have_keys)}개, "
+          f"낱말 {len(have_words)}가지")
+    print()
+    print(f"{'화자 구분':<8}{'발화':>9}{'시간':>8}{'서로 다른 문장':>10}{'그중 새 문장':>9}"
+          f"{'새 낱말':>8}{'지금 쓴 발화':>9}")
+    order = sorted(groups, key=lambda k: -groups[k]["utts"])
+    for k in order:
+        g = groups[k]
+        print(f"{k:<12}{g['utts']:>9}{g['sec'] / 3600:>9.0f}{len(g['keys']):>13}{len(g['new']):>13}"
+              f"{len(g['words']):>10}{have_groups[k]:>12}")
+    new_all = set().union(*(g["new"] for g in groups.values()))
+    words_all = collections.Counter()
+    for g in groups.values():
+        words_all.update(g["words"])
+    utts = sum(g["utts"] for g in groups.values())
+    sec = sum(g["sec"] for g in groups.values())
+    keys_all = set().union(*(g["keys"] for g in groups.values()))
+    print(f"{'전체':<10}{utts:>9}{sec / 3600:>9.0f}{len(keys_all):>13}{len(new_all):>13}{len(words_all):>10}"
+          f"{sum(have_groups.values()):>12}")
+    print()
+    print("'지금 쓴 발화' 가 0 인 화자 구분이 아직 안 받은 세트다. 새 문장·새 낱말이 적으면 더 받아도")
+    print("주로 목소리와 녹음 환경만 늘어난다. 새 낱말(조사가 붙은 꼴 그대로 센다)이 많이 나오는 순:")
+    for k in order:
+        top = groups[k]["words"].most_common(args.top)
+        if top:
+            print(f"  {k}: " + " ".join(f"{w}({n})" for w, n in top))
+
+
 def index_audio(root):
     found = {}
     dup = 0
@@ -405,6 +468,13 @@ def main():
     p.add_argument("--min-unseen", type=int, default=200,
                    help="뺀 뒤 이보다 적으면 빼지 않고 전체를 쓴다")
     p.set_defaults(func=cmd_prep)
+
+    p = sub.add_parser("coverage", help="다른 세트를 받으면 새로 배울 문장·낱말을 센다 (라벨만으로)")
+    p.add_argument("--labels", required=True, help="라벨 폴더(하위 폴더까지) 또는 라벨 zip")
+    p.add_argument("--have", action="append", required=True,
+                   help="지금 학습에 쓴 Kaldi text (예: data/train/text, 여러 번 줄 수 있음)")
+    p.add_argument("--top", type=int, default=10, help="화자 구분마다 보여줄 새 낱말 수")
+    p.set_defaults(func=cmd_coverage)
 
     p = sub.add_parser("text", help="라벨의 문장을 중복 없이 내놓는다 (언어모델용)")
     p.add_argument("--labels", action="append", help="라벨 폴더(하위 폴더까지) 또는 라벨 zip (여러 번 줄 수 있음)")
