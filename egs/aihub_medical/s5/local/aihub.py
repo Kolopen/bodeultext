@@ -333,8 +333,31 @@ def cmd_coverage(args):
         gain = [w for w, _ in real.most_common() if w in all_words and w not in have_words]
         miss = [w for w, _ in real.most_common() if w not in all_words]
         print(f"  더 받으면 새로 들어오는 낱말 {len(gain)}가지: " + " ".join(gain[:args.top * 2]))
-        print(f"  라벨 어디에도 없는 낱말 {len(miss)}가지: " + " ".join(miss[:args.top * 2]))
         print("  (조사가 붙은 꼴 그대로 견주므로 실제보다 낮게 나온다. 두 줄의 차이를 본다.)")
+
+        # 어느 세트부터 받을지: 대본 낱말을 가장 많이 새로 들여오는 세트를 차례로 고른다
+        have_real = sum(1 for w in real if w in have_words)
+        left = {k: {w for w in real if w in groups[k]["words"]} for k in order}
+        covered, steps = set(), []
+        while left:
+            k = max(left, key=lambda k: len(left[k] - covered))
+            add = left.pop(k) - covered
+            if not add:
+                break
+            covered |= add
+            steps.append(f"{k} +{len(add)} ({100 * (have_real + len(covered)) / len(real):.0f}%)")
+        if steps:
+            print("  세트를 받는 순서 (대본 낱말을 많이 늘리는 순, 괄호는 누적):")
+            print("    " + " -> ".join(steps))
+
+        # 낱말 그대로는 없어도 띄어쓰기·조사만 달리 라벨에 든 것("근전도검사는" / "근전도 검사")
+        joined = "\n".join(set().union(*(g["keys"] for g in groups.values())))
+        near = [w for w in miss if any(w[:len(w) - cut] in joined for cut in range(3) if len(w) - cut >= 2)]
+        none = [w for w in miss if w not in near]
+        print(f"  라벨 어디에도 없는 낱말 {len(miss)}가지")
+        print(f"    띄어쓰기·조사만 달리 라벨에 있는 것 {len(near)}가지: " + " ".join(near[:args.top * 2]))
+        print(f"    라벨에 정말 없는 것 {len(none)}가지: " + " ".join(none[:args.top * 3]))
+        print("    (정말 없는 말은 AI-Hub 로는 못 배운다. 실제 진료 녹음을 정답과 모아야 한다.)")
 
 
 def index_audio(root):
