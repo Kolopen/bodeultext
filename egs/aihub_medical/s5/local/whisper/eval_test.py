@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
@@ -36,11 +38,18 @@ def main():
         return " ".join(s.text for s in segments)
 
     rows = read_tsv(args.test)[:args.max_utts]
+    if not rows:
+        sys.exit(f"평가 문장이 없습니다: {args.test}")
+
+    def audio(wavs):
+        return np.concatenate([load_audio(w) for w in wavs])
+
     device = args.device
     for path in args.models:
-        model = WhisperModel(str(path), device=device, compute_type="default")
+        # 받은 모델(float16)과 내보낸 모델(int8)을 같은 조건으로, -AI 처럼 int8 로 돌린다
+        model = WhisperModel(str(path), device=device, compute_type="int8")
         try:
-            run(model, load_audio(rows[0][1]))
+            run(model, audio(rows[0][1]))
         except RuntimeError as error:  # GPU 라이브러리(cuDNN, cuBLAS)를 못 찾으면 CPU 로
             if device == "cpu":
                 raise
@@ -48,10 +57,10 @@ def main():
             device = "cpu"
             model = WhisperModel(str(path), device=device, compute_type="int8")
         refs, hyps, started = [], [], time.time()
-        for _, wav, _, text in rows:
+        for _, wavs, _, texts in rows:
             # 문장부호·띄어쓰기는 빼고, 숫자는 한글로 읽어서 견준다(compare_asr.py 와 같게)
-            hyps.append("".join(hangul(run(model, load_audio(wav)))))
-            refs.append("".join(hangul(text)))
+            hyps.append("".join(hangul(run(model, audio(wavs)))))
+            refs.append("".join(hangul(" ".join(texts))))
         print(f"{path.name:<24} 글자 오류율 {cer(refs, hyps):6.2f}%  ({len(rows)}문장, "
               f"{time.time() - started:.0f}초)", flush=True)
 

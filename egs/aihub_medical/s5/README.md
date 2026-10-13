@@ -283,12 +283,13 @@ local/report_audio.sh /mnt/e/녹음/0102.m4a 내과 2026-10-02
 | `local/expand_lm.sh` | 언어모델 넓히기 |
 | `local/stop_training.sh` | 돌고 있는 학습 멈추기 (`--list` 는 보기만) |
 | `local/eval_engines.sh` | 녹음 몇 개를 Kaldi·whisper turbo·SenseVoice 로 받아 적고 클로바노트 정답과 견준다 |
-| `local/compare_asr.py` | 엔진별 글자 오류율·숫자 정확도 표 |
-| `local/whisper/run.sh` | whisper turbo 를 같은 AI-Hub 데이터로 더 학습(LoRA) → faster-whisper 형식으로 내보내기 |
+| `local/compare_asr.py` | 엔진별 글자 오류율(틀림·빠뜨림·덧붙임)·숫자 정확도 표 |
+| `local/whisper/run.sh` | whisper turbo 를 같은 AI-Hub 데이터로 더 학습(LoRA, 수는 숫자로·문장부호 살림) → faster-whisper 형식으로 내보내기 |
 
 whisper turbo(`/mnt/e/voice-models/sherpa-onnx-whisper-turbo`)를 받아 두면 `report_audio.sh` 는
 whisper 를 본문, Kaldi 를 비교로 같이 쓴다(`다음단계.txt` [11]).
-한국어로 더 학습된 whisper 견주기와 직접 학습하기는 `다음단계.txt` [12].
+whisper 를 같은 AI-Hub 데이터로 더 학습해 본문 엔진으로 쓰는 길(Kaldi 를 더 키우는 대신)은
+`다음단계.txt` [12]. 학습한 모델은 `VOICE_WHISPER=/mnt/e/voice-models/fw-aihub` 로 리포트에 쓴다.
 
 ## 다 쓰고 지우기
 

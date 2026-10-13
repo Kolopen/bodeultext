@@ -16,7 +16,11 @@
 
 재는 것
   글자 오류율   띄어쓰기·문장부호를 빼고 한글 글자만 견준다. 숫자는 한글로 읽어서
-                견준다("216" 과 "이백십육"을 같게 본다).
+                견준다("216" 과 "이백십육"을 같게 본다). 셋으로 나눠서도 보인다.
+                  틀림    다른 글자로 적은 것 (알아듣기를 틀림. 학습으로 주는 쪽)
+                  빠뜨림  정답에 있는데 안 적은 것 (말을 통째로 놓침. 화자분리 구간 밖,
+                          확신이 없어 버린 구간, 긴 구간에서 일찍 멈춤 등)
+                  덧붙임  정답에 없는데 적은 것 (지어낸 말, 같은 말 되풀이)
   숫자 맞음     정답에 나온 숫자 중 받아 적은 글에도 나온 수
   없는 숫자     받아 적은 글에만 있는 숫자. 리포트에 가짜 수치로 오를 수 있다.
 글자 오류율은 엔진끼리 견주는 용도다. 정답도 사람이 다듬은 글이라 완벽하지 않다.
@@ -91,14 +95,24 @@ def numbers(text):
     return re.findall(r"\d+(?:\.\d+)?", convert(text.replace(",", "")))
 
 
-def edit_distance(a, b):
-    prev = list(range(len(b) + 1))
+def edit_ops(a, b):
+    """편집 거리, 그중 빠뜨림(a 에만 있는 글자) 수, 덧붙임(b 에만 있는 글자) 수."""
+    n = len(b)
+    cost, dels, ins = list(range(n + 1)), [0] * (n + 1), list(range(n + 1))
     for i, x in enumerate(a, 1):
-        cur = [i] + [0] * len(b)
-        for j, y in enumerate(b, 1):
-            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y))
-        prev = cur
-    return prev[-1]
+        c_cost, c_dels, c_ins = [i] + [0] * n, [i] + [0] * n, [0] * (n + 1)
+        for j in range(1, n + 1):
+            sub = cost[j - 1] + (x != b[j - 1])
+            drop = cost[j] + 1
+            add = c_cost[j - 1] + 1
+            if sub <= drop and sub <= add:
+                c_cost[j], c_dels[j], c_ins[j] = sub, dels[j - 1], ins[j - 1]
+            elif drop <= add:
+                c_cost[j], c_dels[j], c_ins[j] = drop, dels[j] + 1, ins[j]
+            else:
+                c_cost[j], c_dels[j], c_ins[j] = add, c_dels[j - 1], c_ins[j - 1] + 1
+        cost, dels, ins = c_cost, c_dels, c_ins
+    return cost[n], dels[n], ins[n]
 
 
 def full_text(path, load):
@@ -116,7 +130,7 @@ def main():
     args = p.parse_args()
     load = import_load()
 
-    rows, total = [], collections.defaultdict(lambda: [0, 0, 0, 0, 0])
+    rows, total = [], collections.defaultdict(lambda: [0] * 7)
     for audio in args.audio:
         script = audio.with_name(audio.stem + "_대본.txt")
         clova = audio.with_suffix(".txt")
@@ -136,25 +150,33 @@ def main():
             if not hyp_path.is_file():
                 continue
             hyp = full_text(hyp_path, load)
-            errors = edit_distance(ref_chars, hangul(hyp))
+            errors, drops, adds = edit_ops(ref_chars, hangul(hyp))
             want, got = collections.Counter(ref_nums), collections.Counter(numbers(hyp))
             hit = sum((want & got).values())
             extra = sum(got.values()) - hit
-            rows.append((audio.stem, engine, errors, len(ref_chars), hit, len(ref_nums), extra))
-            t = total[engine]
-            for k, v in enumerate((errors, len(ref_chars), hit, len(ref_nums), extra)):
-                t[k] += v
+            values = (errors, drops, adds, len(ref_chars), hit, len(ref_nums), extra)
+            rows.append((audio.stem, engine) + values)
+            for k, v in enumerate(values):
+                total[engine][k] += v
     if not rows:
         sys.exit("견줄 것이 없습니다. local/eval_engines.sh 를 먼저 돌리세요.")
 
-    print(f"{'녹음':<12}{'엔진':<16}{'글자 오류율':>10}{'숫자 맞음':>12}{'없는 숫자':>10}")
-    for name, engine, errors, n, hit, want, extra in rows:
-        print(f"{name:<12}{engine:<16}{100 * errors / max(n, 1):>9.1f}%{f'{hit}/{want}':>12}{extra:>10}")
+    def line(name, engine, errors, drops, adds, n, hit, want, extra):
+        pct = [100 * v / max(n, 1) for v in (errors, errors - drops - adds, drops, adds)]
+        print(f"{name:<12}{engine:<16}{pct[0]:>9.1f}% {pct[1]:>6.1f}% {pct[2]:>6.1f}% {pct[3]:>6.1f}%"
+              f"{f'{hit}/{want}':>10}{extra:>8}")
+
+    print(f"{'녹음':<12}{'엔진':<16}{'글자 오류율':>7} {'(틀림':>5} {'빠뜨림':>4} {'덧붙임)':>5}"
+          f"{'숫자 맞음':>8}{'없는 숫자':>6}")
+    for row in rows:
+        line(*row)
     if len({r[0] for r in rows}) > 1:
-        print("-" * 60)
-        for engine, (errors, n, hit, want, extra) in total.items():
-            print(f"{'합계':<12}{engine:<16}{100 * errors / max(n, 1):>9.1f}%{f'{hit}/{want}':>12}{extra:>10}")
+        print("-" * 78)
+        for engine, values in total.items():
+            line("합계", engine, *values)
     print("\n글자 오류율·없는 숫자는 낮을수록, 숫자 맞음은 높을수록 좋다.")
+    print("글자 오류율 = 틀림 + 빠뜨림 + 덧붙임. 빠뜨림이 크면 말을 통째로 놓친 것이라 모델을 더")
+    print("학습해도 잘 안 줄고, 받아 적는 과정(화자분리 구간, 확신도 기준)을 봐야 한다.")
 
 
 if __name__ == "__main__":

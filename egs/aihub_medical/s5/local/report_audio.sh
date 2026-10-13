@@ -34,13 +34,15 @@
 #   KALDI_GRAPH     그래프 폴더               기본 graph_big 이 있으면 그것, 없으면 graph
 #   KALDI_NJ        동시 인식 작업 수         기본 4
 #   KALDI_OPTS      transcribe_kaldi.py 에 그대로 넘길 옵션  예: "--lmwt 12 --pause 0.3"
-#   VOICE_WHISPER   whisper turbo 폴더        기본 /mnt/e/voice-models/sherpa-onnx-whisper-turbo
+#   VOICE_WHISPER   whisper 폴더              기본 /mnt/e/voice-models/sherpa-onnx-whisper-turbo
+#                   faster-whisper 폴더(model.bin 이 든 것)도 된다. 예: 직접 학습한
+#                   /mnt/e/voice-models/fw-aihub (다음단계.txt [12])
 #   REPORT_ENGINE   auto(있으면 둘 다) / kaldi / dual   기본 auto
 
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  sed -n '5,39p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '5,41p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 
@@ -79,12 +81,24 @@ if [ -n "${VOICE_MANAGER:-}" ] && ! [ -f "$segmentation" ]; then
 fi
 
 whisper=${VOICE_WHISPER:-/mnt/e/voice-models/sherpa-onnx-whisper-turbo}
+wengine=()
+if [ -f "$whisper/model.bin" ]; then
+  wengine=(--engine faster-whisper --model "$whisper")
+  wname="faster-whisper: $(basename "$whisper")"
+elif [ -f "$whisper/turbo-encoder.int8.onnx" ]; then
+  wengine=(--engine whisper --encoder "$whisper/turbo-encoder.int8.onnx"
+           --decoder "$whisper/turbo-decoder.int8.onnx" --tokens "$whisper/turbo-tokens.txt")
+  wname="whisper turbo"
+fi
 engine=${REPORT_ENGINE:-auto}
 if [ "$engine" = auto ]; then
-  [ -f "$whisper/turbo-encoder.int8.onnx" ] && engine=dual || engine=kaldi
+  [ ${#wengine[@]} -gt 0 ] && engine=dual || engine=kaldi
 fi
 if [ "$engine" = dual ]; then
-  [ -f "$whisper/turbo-encoder.int8.onnx" ] || { echo "whisper turbo 가 없습니다: $whisper (다음단계.txt [11])" >&2; exit 1; }
+  [ ${#wengine[@]} -gt 0 ] || { echo "whisper 모델이 없습니다: $whisper (다음단계.txt [11], [12])" >&2; exit 1; }
+  if [ "${wengine[1]}" = faster-whisper ] && ! python3 -c "import faster_whisper" 2>/dev/null; then
+    echo "faster-whisper 가 없습니다 (다음단계.txt [12-1])." >&2; exit 1
+  fi
   [ -f "$segmentation" ] || [ -f "$models/silero_vad.onnx" ] || {
     echo "whisper 를 쓰려면 화자분리 모델(다음단계.txt [6-2])이 있어야 합니다." >&2; exit 1; }
 fi
@@ -97,13 +111,12 @@ python3 local/transcribe_kaldi.py "$audio" --out "$out/transcript.json" \
 main=$out/transcript.json
 compare=()
 if [ "$engine" = dual ]; then
-  echo "[2/3] 받아 적기 (whisper turbo)"
+  echo "[2/3] 받아 적기 ($wname)"
   wopts=(--vad "$models/silero_vad.onnx")
   [ -f "$segmentation" ] && wopts=(--segmentation "$segmentation" --embedding "$embedding" --speakers "$speakers")
   [ -n "${VOICE_MANAGER:-}" ] && [ -f "$segmentation" ] && wopts+=(--manager "$(realpath "$VOICE_MANAGER")")
-  python3 -m voice_ai.transcribe "$audio" --engine whisper \
-    --encoder "$whisper/turbo-encoder.int8.onnx" --decoder "$whisper/turbo-decoder.int8.onnx" \
-    --tokens "$whisper/turbo-tokens.txt" "${wopts[@]}" --threads "$(nproc)" --out "$out/whisper.json"
+  python3 -m voice_ai.transcribe "$audio" "${wengine[@]}" "${wopts[@]}" --threads "$(nproc)" \
+    --out "$out/whisper.json"
   main=$out/whisper.json
   compare=(--compare "$out/transcript.json")
 else

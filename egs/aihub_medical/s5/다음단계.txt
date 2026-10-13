@@ -419,43 +419,53 @@ report.txt 는 이런 모양이다 (예시).
 
 
 ############################################################
-#  [12] 한국어 whisper 견주기 / whisper 를 AI-Hub 로 더 학습하기
+#  [12] whisper 를 AI-Hub 로 더 학습하기 (Kaldi 대신)
 ############################################################
 
-[11] 의 녹음 3개 결과: kaldi 55.6%, whisper turbo 33.7%, 클로바 15.5% (대본 기준 글자 오류율).
-클로바 쪽으로 다가가려고 두 가지를 해 본다.
-  12-1~12-2  한국어로 이미 더 학습된 whisper(faster-whisper 형식)를 받아 견준다. 받기만 하면 된다.
-  12-3~12-5  whisper turbo 를 Kaldi 와 같은 AI-Hub 데이터(의사_1 + 환자_1)로 직접 더 학습한다.
-faster-whisper 모델은 /mnt/e/voice-models/fw-이름 에 두기만 하면 local/eval_engines.sh 가
-알아서 같이 재고, 표에 fw-이름 으로 나온다.
+[11] 의 녹음 3개 결과 (대본 기준 글자 오류율): kaldi 55.6%, whisper turbo 33.7%, 클로바 15.5%.
 
-12-1. faster-whisper 깔기 (-AI 가 쓰는 파이썬에)
+왜 Kaldi 를 더 학습하지 않고 whisper 를 학습하나
+  - Kaldi 는 AI-Hub 평가 문장에서 5.79% 까지 왔다. 이 데이터는 이미 잘 배웠다. 실제 녹음에서
+    55% 인 것은 덜 배워서가 아니라 배운 것(정해진 문장을 읽은 소리)과 진료 대화가 달라서다.
+    같은 데이터를 더 돌려도 이 차이는 안 줄고, 대화로 된 음성 수천 시간이 있어야 준다.
+  - whisper 는 이미 대화와 잡음에 강하다(의료 데이터 없이 33.7%). 모자란 것은 의료 용어와
+    이 말투인데, 그것이 AI-Hub 의료 데이터에 들어 있다.
+  - Kaldi 는 지금 모델 그대로 리포트의 비교 엔진(숫자·용어 맞대기)으로 계속 쓴다.
+
+ghost613(한국어로 학습된 whisper)이 리포트에서 나빴던 것과 같은 일을 피하도록 만들었다.
+  - 수를 숫자로 배운다. AI-Hub 라벨은 수를 한글로 적었으므로("이백십육") Kaldi 결과에 쓰는
+    local/korean_itn.py 로 숫자로 바꿔서 가르친다("216"). 한글로 배우면 ghost613 처럼
+    "이백 십 육" 을 내놓아 리포트가 검사 수치를 못 찾는다.
+  - 문장부호를 살린다. Kaldi 용 글(text.word)이 아니라 라벨의 원래 글을 쓴다.
+  - 짧은 문장 하나씩만 배우지 않는다. 같은 화자의 이어진 발화를 30초 안에서 이어 붙여 배우고,
+    그중 절반은 구간마다 시각 표시를 달아 배운다. 짧은 문장만 배우면 긴 구간에서 첫 문장만
+    쓰고 멈추기 쉽고, faster-whisper 는 시각 표시로 구간을 나누기 때문이다.
+    whisper 는 늘 30초 단위로 들으므로 이어 붙이면 같은 시간에 몇 배를 배우기도 한다.
+
+12-1. faster-whisper 깔기 (-AI 가 쓰는 파이썬에. 견주기와 리포트에 쓴다)
 
   pip3 install --break-system-packages -e ~/-AI[transcribe,faster]
 
   -> python3 -c "import faster_whisper" 가 아무 말 없이 끝나면 된다.
 
-12-2. 한국어 whisper 받기 → 견주기 (E: 에, 약 3GB)
+12-2. 학습 전에: 원본 whisper turbo 를 faster-whisper 로 견주기 (학습 없이, 약 1.6GB 받기)
 
-  pip3 install --break-system-packages -U huggingface_hub
-  python3 -c "from huggingface_hub import snapshot_download as d; d('ghost613/faster-whisper-large-v3-turbo-korean', local_dir='/mnt/e/voice-models/fw-ghost613')"
-  ls /mnt/e/voice-models/fw-ghost613
+  [11] 의 whisper(33.7%)는 sherpa-onnx 로 바꾼 int8 모델이다. 같은 turbo 를 faster-whisper 로
+  돌리면 얼마인지부터 잰다. 학습한 모델은 이것과 견줘야 학습 효과만 보인다.
 
-  -> model.bin, config.json, tokenizer.json 이 보이면 된다.
-
+  python3 -c "from faster_whisper import download_model as d; d('large-v3-turbo', output_dir='/mnt/e/voice-models/fw-turbo')"
   local/eval_engines.sh /mnt/e/녹음/0001.m4a /mnt/e/녹음/0002.m4a /mnt/e/녹음/0003.m4a
 
-  -> 이미 만든 kaldi.json, whisper.json 은 건너뛰고 fw-ghost613.json 만 새로 만든다.
-  -> 표의 fw-ghost613 줄을 whisper(원본 turbo), clova 줄과 견준다.
-  -> CPU 로 돌아서 녹음 길이만큼쯤 걸린다.
-  -> 다른 faster-whisper 모델도 같은 식으로 /mnt/e/voice-models/fw-이름 에 받으면 된다.
-     하나만 재려면: VOICE_FW="ghost613=/mnt/e/voice-models/fw-ghost613" local/eval_engines.sh ...
+  -> 이미 만든 json 은 건너뛰고 fw-turbo.json 만 새로 만든다. 표에 fw-turbo 줄이 생긴다.
+  -> 표의 (틀림 빠뜨림 덧붙임) 을 본다. 빠뜨림이 크면 말을 통째로 놓친 것이라 학습해도 잘 안
+     준다(화자분리 구간, -AI 의 확신도 기준 쪽 문제). 틀림이 크면 학습으로 줄일 수 있다.
+  -> 녹음 파일 확장자는 실제 파일에 맞게 쓴다.
 
-12-3. whisper 를 AI-Hub 로 더 학습하기 - 준비 (한 번만, 10~20분)
+12-3. 학습 준비 (한 번만, 10~20분)
 
-  Kaldi 학습이 만든 data/train(의사_1 + 환자_1), data/test 를 그대로 쓴다. 지우지 않았어야 한다.
-  모델 전체가 아니라 작은 덧붙임 층(LoRA)만 학습한다. 그래야 8GB GPU 에 들어가고, whisper 가
-  원래 잘하던 대화체 실력을 덜 잃는다.
+  Kaldi 학습이 만든 data/train(의사_1 + 환자_1), data/test 와 AI-Hub 를 푼 폴더
+  (/mnt/e/aihub 의 train/labels, valid/labels, 음성)를 그대로 쓴다. 지웠다면 다시 풀어야 한다.
+  다른 곳에 두었으면 아래 명령마다 --data-root 폴더 를 붙인다.
 
   sudo apt install -y python3-venv
   nvidia-smi                                       # GPU 가 보이는지
@@ -469,37 +479,59 @@ faster-whisper 모델은 /mnt/e/voice-models/fw-이름 에 두기만 하면 loca
   nohup local/whisper/run.sh --stage 1 > whisper.log 2>&1 &
   tail -f whisper.log                              # Ctrl+C 는 보기만 멈춘다
 
-  1 단계  학습 목록: data/train 에서 발화 4만 개(약 18만 개 중), 평가 문장(data/test)에서
-          확인용 300 + 평가용 500 개를 고른다.
+  1 단계  학습 목록. 라벨 113만 개를 읽느라 10~30분 걸린다. 끝에 이런 줄이 나온다.
+            exp/whisper/train.tsv: 발화 100000개, 95.0시간 -> 27000줄 (한 줄에 평균 3.7개를 이어 붙임)
+              수를 숫자로 바꾼 발화 N개. 예:
+                혈압이 백사십에 구십이에요.
+                  -> 혈압이 140에 90이에요.
+          예시가 이상하게 바뀌었으면(숫자가 아닌 말이 숫자로) 학습 전에 멈추고 그 줄을 보여 준다.
   2 단계  학습. 이런 줄이 나온다.
-            걸음 120/2500  손실 0.412  학습률 6.0e-05  4.1초/걸음  남은 시간 2.7시간
-          1000 걸음마다 "평가: 글자 오류율 N%" 와 정답/결과 예시가 나온다. 이 값이 줄면 배우는 중이다.
+            걸음 120/1700  손실 0.412  학습률 6.0e-05  3.1초/걸음  남은 시간 1.4시간
+          500 걸음마다 "평가: 글자 오류율 N%" 와 정답/결과 예시가 나온다. 이 값이 줄면 배우는 중이다.
   3 단계  faster-whisper 형식으로 내보내기 -> /mnt/e/voice-models/fw-aihub (학습한 것)
-                                              /mnt/e/voice-models/fw-turbo (학습 전 원본, 견주기용)
-  4 단계  AI-Hub 평가 문장 500개로 fw-turbo / fw-aihub (/ fw-ghost613) 를 견준다.
+          (12-2 를 안 했으면 원본 fw-turbo 도 여기서 만든다)
+  4 단계  AI-Hub 평가 문장(학습에 없던 문장) 500개로 fw-turbo 와 fw-aihub 를 견준다.
           결과는 exp/whisper/eval_test.txt
 
   -> "CUDA out of memory" 가 나오면 묶음을 줄여 다시 한다(이어서 한다):
        nohup local/whisper/run.sh --stage 2 --batch 4 --grad-accum 4 > whisper.log 2>&1 &
-  -> 더 많이 학습하려면 --max-utts 80000 처럼 늘린다(1 단계부터 다시. 시간도 그만큼 늘어난다).
-     처음에는 4만 개로 효과가 있는지부터 본다.
+  -> 발화 10만 개(data/train 의 절반쯤)로 시작한다. 실제 녹음에서 효과가 보이면 전부 써 본다:
+       nohup local/whisper/run.sh --stage 1 --max-utts 0 --dir exp/whisper_all > whisper.log 2>&1 &
 
   멈추기 / 이어 하기
     local/stop_training.sh                           # 멈춘다 (200 걸음마다 저장해 둔다)
     nohup local/whisper/run.sh --stage 2 > whisper.log 2>&1 &   # 저장한 곳부터 이어 간다
     -> 컴퓨터를 꺼도 된다. 다시 켜면 위 명령으로 이어 한다.
+    -> --batch 등을 바꿔서 돌렸으면 이어 할 때도 똑같이 붙인다.
 
-12-5. 실제 진료 녹음으로 견주기
+12-5. 실제 진료 녹음으로 견주기 → 리포트에 쓰기
 
   local/eval_engines.sh /mnt/e/녹음/0001.m4a /mnt/e/녹음/0002.m4a /mnt/e/녹음/0003.m4a
 
-  -> 표에 fw-aihub(학습한 것), fw-turbo(원본) 줄이 더 생긴다. 둘의 차이가 학습 효과다.
-  -> AI-Hub 는 정해진 문장을 읽은 녹음이라 4 단계(평가 문장)에서는 크게 좋아지고, 실제 대화에서는
-     덜 좋아지거나 오히려 나빠질 수도 있다. 판단은 이 표(실제 녹음)로 한다.
-  -> 학습한 모델은 숫자를 한글로 적는다("백이십"). 표는 숫자를 바꿔서 견주므로 상관없다.
+  -> 표에 fw-aihub 줄이 더 생긴다. fw-turbo 와의 차이가 학습 효과다.
+  -> AI-Hub 는 정해진 문장을 읽은 녹음이라 4 단계(평가 문장)에서는 크게 좋아져도 실제 대화에서는
+     덜 좋아지거나 나빠질 수도 있다. 판단은 이 표(실제 녹음)로 한다. 숫자 맞음도 같이 본다.
+  -> 0001~0003 은 평가용으로만 둔다. 학습에 넣으면 점수가 실제보다 좋게 나온다.
 
-12-6. 지우기
+  더 나으면 리포트의 본문 엔진으로 쓴다 (Kaldi 는 그대로 비교로 같이 돈다):
+    VOICE_WHISPER=/mnt/e/voice-models/fw-aihub local/report_audio.sh /mnt/e/녹음/0102.m4a 내과
+
+12-6. 그다음에 해 볼 것 (효과 큰 순)
+
+  1) 실제 진료 녹음 + 고친 정답으로 학습. 같은 종류의 소리 1~2시간이 읽은 문장 수만 개보다
+     낫다. 클로바노트 결과를 고쳐서 정답으로 쓸 수 있다. 환자 동의가 있는 녹음만, 이 컴퓨터
+     안에서만 쓴다. 평가용 녹음(0001~0003)과는 겹치지 않게 한다.
+  2) large-v3 로 견주기. turbo 는 large-v3 의 디코더를 줄여 빠르게 만든 것이라 조금 덜 정확하다.
+       python3 -c "from faster_whisper import download_model as d; d('large-v3', output_dir='/mnt/e/voice-models/fw-large-v3')"
+     로 받아 12-2 처럼 견준다(약 3GB, CPU 로는 turbo 보다 몇 배 느리다). 크게 나으면 같은 학습을
+     large-v3 로 해 볼 수 있다. 결과는 fw-aihub-v3 로 따로 나온다(GPU 메모리가 모자라면
+     --batch 4 --grad-accum 4 를 붙인다):
+       nohup local/whisper/run.sh --stage 1 --base openai/whisper-large-v3 --dir exp/whisper_v3 \
+         --name aihub-v3 > whisper_v3.log 2>&1 &
+  3) 남은 AI-Hub 세트(의사_2, 환자_2 ...)를 더 받아 넣기. 같은 읽은 문장이라 효과는 1) 보다 작다.
+
+12-7. 지우기
 
   rm -rf ~/whisper-env exp/whisper                  # 학습 환경과 중간 파일 (약 5GB)
   ~/.cache/huggingface 에 받은 원본 whisper(약 1.6GB)도 지워도 된다.
-  E:\voice-models\fw-* 는 견주기에 쓰므로 필요 없을 때 지운다.
+  E:\voice-models\fw-* 는 견주기·리포트에 쓰므로 필요 없을 때 지운다.
