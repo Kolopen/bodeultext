@@ -4,7 +4,7 @@
 """Kaldi 데이터 폴더(data/train, data/test)를 whisper 학습용 목록(TSV)으로 바꾼다.
 
   python3 local/whisper/prepare_data.py data/train exp/whisper/train.tsv \\
-      --labels /mnt/e/aihub/train/labels --max-utts 100000 --pack-sec 28
+      --labels /mnt/e/aihub/train/labels --max-utts 100000 --pack-sec 28 --holdout data/test/text
   python3 local/whisper/prepare_data.py data/test exp/whisper/all_test.tsv \\
       --labels /mnt/e/aihub/valid/labels
 
@@ -22,6 +22,11 @@ whisper 는 늘 30초 단위로 들어서, 3초짜리 발화 하나만 주면 �
 받아 적도록 배운다(짧은 문장만 배우면 긴 구간에서 첫 문장만 쓰고 멈추기 쉽다).
 이을 길이는 줄마다 0 ~ pack-sec 초에서 고르게 뽑으므로 한 문장짜리 줄도 남는다.
 
+--holdout 으로 평가 문장(Kaldi text)을 주면 같은 문장(군말·띄어쓰기만 다른 것까지)을 다른
+사람이 읽은 발화도 학습에서 뺀다. 이 데이터는 한 문장을 여러 사람이 읽어서, 빼지 않으면
+평가 문장을 외워서 맞히게 된다. data/train 은 Kaldi 때 이미 평가 문장을 뺐지만, 세트를 더
+받아 만든 data/train_all 에는 평가 문장이 다른 사람 목소리로 들어 있다.
+
 한 줄: 발화ID<TAB>wav|wav..<TAB>길이|길이..<TAB>글|글..  (이어 붙인 것은 '|' 로 잇는다)
 """
 
@@ -35,7 +40,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from aihub import DEID_RE, DUAL_RE, FILLER_SLASH_RE, field, iter_labels, utt_id_of  # noqa: E402
+from aihub import (DEID_RE, DUAL_RE, FILLER_SLASH_RE, field, iter_labels, normalize,  # noqa: E402
+                   sentence_key, utt_id_of)
 from korean_itn import convert  # noqa: E402
 
 SEP = "|"
@@ -121,8 +127,15 @@ def main():
     p.add_argument("--max-utts", type=int, default=0, help="이만큼만 고르게 뽑는다 (0 이면 전부)")
     p.add_argument("--max-sec", type=float, default=30.0, help="whisper 는 30초까지만 듣는다")
     p.add_argument("--pack-sec", type=float, default=0.0, help="이어 붙일 최대 길이(초). 0 이면 잇지 않는다")
+    p.add_argument("--holdout", action="append", default=[],
+                   help="이 Kaldi text(평가 문장)와 같은 문장은 학습에서 뺀다. 여러 번 줄 수 있다")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
+
+    held = set()
+    for path in args.holdout:
+        with open(path, encoding="utf-8") as f:
+            held.update(sentence_key(line.split(maxsplit=1)[1]) for line in f if " " in line.strip())
 
     wavs = read_map(args.data / "wav.scp")
     durs = {k: float(v) for k, v in read_map(args.data / "utt2dur").items()} \
@@ -143,7 +156,7 @@ def main():
         raw = read_map(text_file)
         print("  --labels 가 없어 Kaldi 글(text.word)을 씁니다. 문장부호가 없습니다.", file=sys.stderr)
 
-    rows, changed, dropped = [], [], 0
+    rows, changed, dropped, held_out = [], [], 0, 0
     for utt in sorted(wavs):
         if utt not in raw:
             continue
@@ -151,6 +164,10 @@ def main():
         text = whisper_text(raw[utt])
         if text is None or dur > args.max_sec:
             dropped += 1
+            continue
+        # 견주기는 Kaldi 와 같은 꼴(수는 한글, 문장부호 없음)로 한다
+        if held and sentence_key(normalize(raw[utt])[0] or raw[utt]) in held:
+            held_out += 1
             continue
         path = wav_path(wavs[utt])
         if SEP in path:
@@ -179,6 +196,8 @@ def main():
           + (f" (한 줄에 평균 {len(rows) / len(groups):.1f}개를 이어 붙임)" if args.pack_sec > 0 else ""))
     if dropped:
         print(f"  뺀 발화 {dropped}개 (비식별화 태그, {args.max_sec:.0f}초 넘음)")
+    if held_out:
+        print(f"  평가 문장과 같은 문장이라 뺀 발화 {held_out}개")
     if changed:
         print(f"  수를 숫자로 바꾼 발화 {len(changed)}개. 예:")
         for before, after in random.Random(1).sample(changed, min(8, len(changed))):

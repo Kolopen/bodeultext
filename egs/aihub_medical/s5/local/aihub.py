@@ -21,11 +21,14 @@
 
   coverage 다른 세트(간호사, 의사_2 ...)를 더 받으면 지금 학습한 글에 없던 문장·낱말이
            얼마나 늘어나는지 라벨만으로 센다. 수백 GB 를 받기 전에 돌린다.
+           --real 로 실제 진료 대본을 주면 그 낱말이 지금 학습한 글과 라벨 전체에 각각
+           얼마나 들어 있는지도 본다(더 받으면 실제 진료 말을 얼마나 더 덮는지).
 
   python3 local/aihub.py inspect --labels /mnt/e/aihub/train/labels   (폴더, zip, 폴더 안의 zip)
   python3 local/aihub.py prep --labels .../labels/train --audio .../audio/train \\
       --out data/train
-  python3 local/aihub.py coverage --labels /mnt/e/aihub/train/labels --have data/train/text
+  python3 local/aihub.py coverage --labels /mnt/e/aihub/train/labels --have data/train/text \\
+      --real /mnt/e/녹음/0002_대본.txt --real /mnt/e/녹음/0003_대본.txt
 """
 
 import argparse
@@ -47,6 +50,9 @@ FILLER_SLASH_RE = re.compile(r"(?<=\S)/")
 PUNCT_RE = re.compile(r"[,.?!~…·\"'`“”‘’:;*]")
 SPACE_RE = re.compile(r"\s+")
 HANGUL_ONLY_RE = re.compile(r"^[가-힣 ]+$")
+# 대본 줄 앞의 화자·시각 표시("의사: ", "[00:12] ")와 클로바노트의 "참석자 1 00:12" 줄
+SCRIPT_LABEL_RE = re.compile(r"^\s*(?:\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*)?(?:[^\s:：]{1,8}\s*\d?\s*[:：]\s*)?")
+CLOVA_HEADER_RE = re.compile(r"^\s*참석자\s*\d+")
 
 
 def normalize(text):
@@ -257,12 +263,24 @@ def cmd_coverage(args):
     if not have_keys:
         sys.exit(f"지금 학습에 쓴 글이 비었습니다: {args.have}")
 
+    real = collections.Counter()
+    for path in args.real:
+        with open(path, encoding="utf-8-sig", errors="replace") as f:
+            for line in f:
+                if CLOVA_HEADER_RE.match(line):
+                    continue
+                line = PUNCT_RE.sub(" ", SCRIPT_LABEL_RE.sub("", line))
+                real.update(w for w in line.split() if HANGUL_ONLY_RE.match(w))
+
+    all_words = set()
     groups = collections.defaultdict(lambda: {"utts": 0, "sec": 0.0, "keys": set(), "new": set(),
                                               "words": collections.Counter()})
     for path, label in iter_labels(args.labels):
         text, _ = normalize(str(field(label, "전사정보", "LabelText")))
         if text is None:
             continue
+        if real:
+            all_words.update(text.split())
         g = groups[utt_id_of(label, path)[:2]]
         g["utts"] += 1
         g["sec"] += seconds(label)
@@ -300,6 +318,23 @@ def cmd_coverage(args):
         top = groups[k]["words"].most_common(args.top)
         if top:
             print(f"  {k}: " + " ".join(f"{w}({n})" for w, n in top))
+
+    if real:
+        def share(vocab):
+            types = sum(1 for w in real if w in vocab)
+            tokens = sum(n for w, n in real.items() if w in vocab)
+            return f"{types:>5}가지 ({100 * types / len(real):4.1f}%)  나온 횟수로 {100 * tokens / sum(real.values()):4.1f}%"
+
+        print()
+        print(f"[실제 진료 대본의 낱말] {len(real)}가지, {sum(real.values())}번 "
+              f"({', '.join(os.path.basename(p) for p in args.real)})")
+        print(f"  지금 학습한 글에 있는 것  {share(have_words)}")
+        print(f"  라벨 전체에 있는 것       {share(all_words)}")
+        gain = [w for w, _ in real.most_common() if w in all_words and w not in have_words]
+        miss = [w for w, _ in real.most_common() if w not in all_words]
+        print(f"  더 받으면 새로 들어오는 낱말 {len(gain)}가지: " + " ".join(gain[:args.top * 2]))
+        print(f"  라벨 어디에도 없는 낱말 {len(miss)}가지: " + " ".join(miss[:args.top * 2]))
+        print("  (조사가 붙은 꼴 그대로 견주므로 실제보다 낮게 나온다. 두 줄의 차이를 본다.)")
 
 
 def index_audio(root):
@@ -474,6 +509,8 @@ def main():
     p.add_argument("--have", action="append", required=True,
                    help="지금 학습에 쓴 Kaldi text (예: data/train/text, 여러 번 줄 수 있음)")
     p.add_argument("--top", type=int, default=10, help="화자 구분마다 보여줄 새 낱말 수")
+    p.add_argument("--real", action="append", default=[],
+                   help="실제 진료 대본 (예: /mnt/e/녹음/0002_대본.txt, 여러 번 줄 수 있음)")
     p.set_defaults(func=cmd_coverage)
 
     p = sub.add_parser("text", help="라벨의 문장을 중복 없이 내놓는다 (언어모델용)")

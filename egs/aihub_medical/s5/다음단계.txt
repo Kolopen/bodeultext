@@ -528,20 +528,53 @@ ghost613(한국어로 학습된 whisper)이 리포트에서 나빴던 것과 같
      --batch 4 --grad-accum 4 를 붙인다):
        nohup local/whisper/run.sh --stage 1 --base openai/whisper-large-v3 --dir exp/whisper_v3 \
          --name aihub-v3 > whisper_v3.log 2>&1 &
-  3) 남은 AI-Hub 세트 더 받기 (간호사_1~4 약 85GB, 의사_2~3 약 36GB, 환자_2~6 약 84GB).
-     이 데이터 전체(113만 발화, 1120시간)가 같은 문장 약 4만 개를 2425명이 돌아가며 읽은 것이라,
-     더 받으면 주로 목소리와 녹음 환경이 늘어난다. 받기 전에 두 가지를 본다.
-     가) 새 문장·새 낱말이 얼마나 되는지 (라벨은 이미 다 있다. 10~30분):
-           python3 local/aihub.py coverage --labels /mnt/e/aihub/train/labels --have data/train/text
-         '지금 쓴 발화' 가 0 인 줄이 아직 안 받은 세트다. 새 문장이 많은 세트부터 받는다.
-     나) 데이터를 늘리면 실제 녹음이 좋아지는지 (학습 곡선). 발화 5만 개로 하나 더 학습해서
-         10만 개(기본) 모델과 eval_engines.sh 표로 견준다. 5만 -> 10만에서 실제 녹음이 거의
-         안 좋아지면, 같은 종류의 데이터를 더 받아도 거의 안 좋아진다.
-           nohup local/whisper/run.sh --stage 1 --max-utts 50000 --dir exp/whisper_50k \
-             --name aihub-50k > whisper_50k.log 2>&1 &
+  3) 남은 AI-Hub 세트를 더 받아 학습하기. 세트마다 문장이 거의 안 겹쳐서 말이 크게 는다 (12-8).
 
 12-7. 지우기
 
   rm -rf ~/whisper-env exp/whisper                  # 학습 환경과 중간 파일 (약 5GB)
   ~/.cache/huggingface 에 받은 원본 whisper(약 1.6GB)도 지워도 된다.
   E:\voice-models\fw-* 는 견주기·리포트에 쓰므로 필요 없을 때 지운다.
+
+12-8. AI-Hub 세트를 더 받아서 학습하기
+
+  받기 전에 라벨만으로 센 결과 (python3 local/aihub.py coverage ...):
+    화자 구분   세트                  시간   새 문장   새 낱말   들어 있는 말 (새 낱말 많은 순)
+    HB         의사_1~3 (1 은 있음)    249    3,340     1,459   진단받으신 음식이나 피해야 약물이
+    HA         간호사_1~4              350   13,254    15,519   경우 따라 가능합니다 주시면 검사가
+    PA         환자_1 (있음)           105      183       251
+    PB~PF      환자_2~6                416   약 2만    약 2만    퇴원 몸무게는 / 소주 피워요 / 이틀에 오후
+  세트(화자 구분)마다 읽은 문장이 거의 안 겹친다. 지금 학습한 글(의사_1 + 환자_1)에는 전체
+  문장 39,503개 중 6,175개(16%)만 들어 있다. 더 받으면 목소리만이 아니라 말이 크게 늘어난다.
+
+  0) 그 말이 실제 진료에 나오는 말인지 대본으로 본다 (대본은 세기만 하고 학습에는 안 쓴다):
+       python3 local/aihub.py coverage --labels /mnt/e/aihub/train/labels --have data/train/text \
+         --real /mnt/e/녹음/0002_대본.txt --real /mnt/e/녹음/0003_대본.txt
+     끝에 나오는 두 줄을 견준다.
+       지금 학습한 글에 있는 것   대본 낱말 중 지금 whisper 가 AI-Hub 로 배운 것
+       라벨 전체에 있는 것        세트를 다 받으면 배우게 되는 것
+     차이가 크면 받을 만하다. "라벨 어디에도 없는 낱말" 은 AI-Hub 로는 못 배우는 말이다
+     (실제 진료 녹음을 정답과 함께 모아야 배운다. 12-6 의 1).
+
+  1) 받기: AI-Hub '141.의료진 및 환자 음성' -> 1.Training -> 원천데이터 의 남은 zip 을
+     E:\aihub-zip 에 받는다. 전부 약 205GB.
+     나눠 받는다면 의료진(간호사_1~4, 의사_2~3)부터 받는다. 리포트 항목(진단·약·복용 방법·
+     생활 지도)은 거의 의료진 말에서 나온다.
+  2) 풀기 (이미 꺼낸 파일은 건너뛴다. 라벨은 이미 있으므로 음성만 꺼낸다):
+       python3 local/unpack_aihub.py /mnt/e/aihub-zip/* --auto /mnt/e/aihub
+     -> 필요한 공간은 지금 꺼내 둔 의사_1 + 환자_1(179시간)의 크기로 가늠한다.
+          du -sh /mnt/e/aihub/train/audio
+        남은 세트(약 940시간)는 그 5배쯤 든다. 다 꺼냈으면 zip 은 지운다.
+  3) 데이터 폴더 만들기 (Kaldi 의 data/train 은 그대로 두고 새로 만든다. 1시간 안팎):
+       python3 local/aihub.py prep --labels /mnt/e/aihub/train/labels \
+         --audio /mnt/e/aihub/train/audio --out data/train_all
+  4) 학습 (결과는 fw-aihub-all 로 따로 나온다):
+       nohup local/whisper/run.sh --stage 1 --train-data data/train_all --max-utts 300000 \
+         --dir exp/whisper_all --name aihub-all > whisper_all.log 2>&1 &
+     -> 한 문장을 평균 28명이 읽었으므로 전부(113만) 안 써도 30만 개면 거의 모든 문장이 들어간다.
+        시간은 10만 개(fw-aihub)의 약 3배.
+     -> 평가 문장(data/test)과 같은 문장은 다른 사람이 읽은 것도 학습에서 뺀다. 빼지 않으면
+        평가 문장을 외워서 맞혀 점수가 실제보다 좋게 나온다. 1 단계에 뺀 수가 나온다.
+  5) 견주기: local/eval_engines.sh 표에 fw-aihub-all 줄이 생긴다. fw-aihub(의사_1 + 환자_1)
+     와의 차이가 데이터를 늘린 효과다.
+

@@ -25,6 +25,7 @@ set -euo pipefail
 stage=0
 stop_stage=4
 data_root=/mnt/e/aihub   # Kaldi 때 쓴 AI-Hub 폴더 (train/labels, valid/labels 를 읽는다)
+train_data=data/train    # 학습할 발화 (Kaldi 데이터 폴더). 세트를 더 받았으면 data/train_all (다음단계.txt [12-8])
 max_utts=100000    # 학습에 쓸 발화 수 (data/train 은 약 18만). 0 이면 전부
 pack_sec=28        # 같은 화자의 이어진 발화를 이 길이 안에서 이어 붙인다 (0 이면 안 잇는다)
 epochs=1
@@ -71,8 +72,9 @@ if run 1; then
     [ -e "$d" ] || { echo "AI-Hub 라벨이 없습니다: $d (--data-root 로 알려 주세요)" >&2; exit 1; }
   done
   mkdir -p $dir
-  "$py" local/whisper/prepare_data.py data/train $dir/train.tsv --labels "$data_root/train/labels" \
-    --max-utts $max_utts --pack-sec $pack_sec
+  # 평가 문장(data/test)과 같은 문장은 다른 사람이 읽은 것도 학습에서 뺀다
+  "$py" local/whisper/prepare_data.py $train_data $dir/train.tsv --labels "$data_root/train/labels" \
+    --max-utts $max_utts --pack-sec $pack_sec --holdout data/test/text
   # 평가 문장(학습에 없던 문장)을 둘로 나눈다: 학습 중 확인용 300, 마지막 평가용 500
   "$py" local/whisper/prepare_data.py data/test $dir/all_test.tsv --labels "$data_root/valid/labels"
   "$py" - "$dir" <<'EOF'
@@ -83,6 +85,8 @@ random.Random(1).shuffle(rows)
 open(f"{d}/valid.tsv", "w", encoding="utf-8").writelines(r + "\n" for r in rows[:300])
 open(f"{d}/test.tsv", "w", encoding="utf-8").writelines(r + "\n" for r in rows[300:800])
 print(f"확인용 {len(rows[:300])}개, 평가용 {len(rows[300:800])}개")
+if len(rows) < 800:
+    print("  평가 문장이 적습니다. data/test 를 확인하세요.")
 EOF
 fi
 
