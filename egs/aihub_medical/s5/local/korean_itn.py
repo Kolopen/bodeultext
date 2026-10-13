@@ -376,12 +376,6 @@ def convert(text):
                 i += 1
                 continue
 
-        # "통증이 칠 정도예요" -> 7 정도예요. "이 정도", "일 정도"(일, work)는 그대로
-        if not suffix and nxt.startswith("정도") and num not in ("일", "이", "백", "천", "만"):
-            out.append(str(value(num)))
-            i = j
-            continue
-
         counter = counter_of(num, nxt) if not suffix else None
         if counter and interval_ahead(nxt, tokens[j + 1:j + 3]):
             keep()
@@ -495,7 +489,8 @@ CASES = [
     ("무슨 일 주로 하세요", "무슨 일 주로 하세요"),
     ("가벼운 일 정도는 괜찮아요", "가벼운 일 정도는 괜찮아요"),
     ("이 정도면 괜찮아요", "이 정도면 괜찮아요"),
-    ("통증이 칠 정도예요", "통증이 7 정도예요"),
+    ("통증이 칠 정도예요", "통증이 칠 정도예요"),  # "그 정도"를 "구 정도"로 잘못 들으면 9 가 된다
+    ("네 구 정도만 하셔서 왔습니다", "네 구 정도만 하셔서 왔습니다"),
     ("일 시간 줄이세요", "일 시간 줄이세요"),
     ("오 육 개월 드세요", "오 육 개월 드세요"),
     ("이삼 일 정도 지켜보죠", "이삼 일 정도 지켜보죠"),

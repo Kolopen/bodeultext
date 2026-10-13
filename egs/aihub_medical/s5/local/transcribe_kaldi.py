@@ -408,6 +408,11 @@ def main():
                 continue
             chunks.append({"index": len(chunks), "speaker": speaker, "start_ms": start,
                            "end_ms": end, "raw_text": raw, "text": itn(raw)})
+        # 화자분리는 사람별 발언을 시작 시각 순으로 주지만, 한 사람의 긴 발언을 자른 조각
+        # 사이에 다른 사람의 짧은 맞장구가 끼어든다. 대화 순서대로 다시 늘어놓는다.
+        chunks.sort(key=lambda c: (c["start_ms"], c["end_ms"]))
+        for n, c in enumerate(chunks):
+            c["index"] = n
         if empty:
             print(f"{empty}구간은 받아 적은 말이 없어 뺐습니다 (쉬는 소리, 기침, 잡음 등).")
         if args.manager:
