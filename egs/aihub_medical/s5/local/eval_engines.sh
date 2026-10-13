@@ -6,8 +6,10 @@
 #
 #   local/eval_engines.sh /mnt/e/녹음/0102.m4a /mnt/e/녹음/0103.m4a /mnt/e/녹음/0104.m4a
 #
-# 녹음마다 같은 이름의 정답 텍스트를 옆에 둔다(클로바노트에서 텍스트로 내보낸 것).
-#   /mnt/e/녹음/0102.m4a  ->  /mnt/e/녹음/0102.txt
+# 녹음마다 같은 이름의 정답 텍스트를 옆에 둔다.
+#   /mnt/e/녹음/0102_대본.txt   실제로 한 말(원본 대본). 있으면 이것이 정답이고,
+#                               클로바노트(0102.txt)도 한 엔진으로 함께 잰다.
+#   /mnt/e/녹음/0102.txt        클로바노트에서 텍스트로 내보낸 것. 대본이 없으면 이것이 정답.
 #
 # 결과
 #   /mnt/e/녹음/0102/kaldi.json, whisper.json, sense.json   엔진별 받아 적은 글
@@ -23,7 +25,7 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  sed -n '5,22p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '5,25p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 
@@ -51,7 +53,7 @@ for audio in "${audios[@]}"; do
   out=${audio%.*}
   mkdir -p "$out"
   echo "== $(basename "$audio")"
-  [ -f "${audio%.*}.txt" ] || echo "  정답 ${audio%.*}.txt 가 없습니다. 표에서 빠집니다." >&2
+  [ -f "${audio%.*}.txt" ] || [ -f "${audio%.*}_대본.txt" ] || echo "  정답(${audio%.*}_대본.txt 나 .txt)이 없습니다. 표에서 빠집니다." >&2
   if [ ! -f "$out/kaldi.json" ]; then
     echo "  [Kaldi]"
     python3 local/transcribe_kaldi.py "$audio" --out "$out/kaldi.json" "${diar[@]}" | sed 's/^/    /'

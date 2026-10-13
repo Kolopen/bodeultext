@@ -5,8 +5,10 @@
 
   python3 local/compare_asr.py /mnt/e/녹음/0102.m4a /mnt/e/녹음/0103.m4a ...
 
-녹음마다 이런 파일을 찾는다 (local/eval_engines.sh 가 만든다).
-  /mnt/e/녹음/0102.txt              정답. 클로바노트에서 내보낸 텍스트
+녹음마다 이런 파일을 찾는다 (json 은 local/eval_engines.sh 가 만든다).
+  /mnt/e/녹음/0102_대본.txt         실제로 한 말(원본 대본). 있으면 이것이 정답이다
+  /mnt/e/녹음/0102.txt              클로바노트에서 내보낸 텍스트. 대본이 없으면 이것이 정답,
+                                    대본이 있으면 클로바노트도 한 엔진으로 함께 잰다
   /mnt/e/녹음/0102/kaldi.json       Kaldi
   /mnt/e/녹음/0102/whisper.json     whisper turbo
   /mnt/e/녹음/0102/sense.json       SenseVoice (있으면)
@@ -26,6 +28,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+# 대본 줄 앞의 화자·시각 표시. "의사: ", "환자 : ", "A:", "[00:12] ", "00:12 "
+LABEL_RE = re.compile(r"^\s*(?:\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*)?(?:[^\s:：]{1,8}\s*\d?\s*[:：]\s*)?")
+CLOVA_HEADER = re.compile(r"^참석자\s*\d+\s+(?:\d{1,2}:)?\d{1,2}:\d{2}\s*$", re.M)
 ENGINES = ("kaldi", "whisper", "sense")
 DIGITS = "영일이삼사오육칠팔구"
 
@@ -93,6 +98,10 @@ def edit_distance(a, b):
 
 
 def full_text(path, load):
+    if path.suffix == ".txt":
+        raw = path.read_text(encoding="utf-8-sig", errors="replace")
+        if not CLOVA_HEADER.search(raw):  # 화자·시각 표시만 떼고 그대로 쓴다
+            return " ".join(LABEL_RE.sub("", line) for line in raw.splitlines())
     utterances, _ = load(path)
     return " ".join(u.text for u in sorted(utterances, key=lambda u: u.start_ms))
 
@@ -105,14 +114,19 @@ def main():
 
     rows, total = [], collections.defaultdict(lambda: [0, 0, 0, 0, 0])
     for audio in args.audio:
-        ref_path = audio.with_suffix(".txt")
+        script = audio.with_name(audio.stem + "_대본.txt")
+        clova = audio.with_suffix(".txt")
+        ref_path = script if script.is_file() else clova
         if not ref_path.is_file():
-            print(f"정답이 없어 건너뜁니다: {ref_path}", file=sys.stderr)
+            print(f"정답이 없어 건너뜁니다: {script.name} / {clova.name}", file=sys.stderr)
             continue
+        print(f"{audio.stem}: 정답 = {ref_path.name}", file=sys.stderr)
         ref = full_text(ref_path, load)
         ref_chars, ref_nums = hangul(ref), numbers(ref)
-        for engine in ENGINES:
-            hyp_path = audio.with_suffix("") / f"{engine}.json"
+        hyps = [(e, audio.with_suffix("") / f"{e}.json") for e in ENGINES]
+        if ref_path == script:
+            hyps.insert(0, ("clova", clova))
+        for engine, hyp_path in hyps:
             if not hyp_path.is_file():
                 continue
             hyp = full_text(hyp_path, load)
