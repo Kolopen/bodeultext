@@ -4,6 +4,10 @@
 #
 # 진료 녹음 하나 -> 받아 적기(학습한 Kaldi 모델) -> 리포트(-AI 의 voice-analyze)
 #
+# whisper turbo 모델(VOICE_WHISPER)이 있으면 두 엔진을 같이 쓴다. 본문은 whisper,
+# 비교는 Kaldi 로 돌리고, 두 엔진의 숫자·용어가 엇갈리는 자리를 리포트에 표시한다.
+# REPORT_ENGINE=kaldi 로 주면 Kaldi 만 쓴다.
+#
 #   local/report_audio.sh 녹음.m4a [진료과] [진료일]
 #   local/report_audio.sh /mnt/e/녹음/0102.m4a 내과 2026-10-02
 #
@@ -30,11 +34,13 @@
 #   KALDI_GRAPH     그래프 폴더               기본 graph_big 이 있으면 그것, 없으면 graph
 #   KALDI_NJ        동시 인식 작업 수         기본 4
 #   KALDI_OPTS      transcribe_kaldi.py 에 그대로 넘길 옵션  예: "--lmwt 12 --pause 0.3"
+#   VOICE_WHISPER   whisper turbo 폴더        기본 /mnt/e/voice-models/sherpa-onnx-whisper-turbo
+#   REPORT_ENGINE   auto(있으면 둘 다) / kaldi / dual   기본 auto
 
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  sed -n '5,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '5,39p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 
@@ -72,18 +78,45 @@ if [ -n "${VOICE_MANAGER:-}" ] && ! [ -f "$segmentation" ]; then
   echo "VOICE_MANAGER 는 화자분리 모델(다음단계.txt [6-2])이 있어야 씁니다. 이번에는 무시합니다." >&2
 fi
 
+whisper=${VOICE_WHISPER:-/mnt/e/voice-models/sherpa-onnx-whisper-turbo}
+engine=${REPORT_ENGINE:-auto}
+if [ "$engine" = auto ]; then
+  [ -f "$whisper/turbo-encoder.int8.onnx" ] && engine=dual || engine=kaldi
+fi
+if [ "$engine" = dual ]; then
+  [ -f "$whisper/turbo-encoder.int8.onnx" ] || { echo "whisper turbo 가 없습니다: $whisper (다음단계.txt [11])" >&2; exit 1; }
+  [ -f "$segmentation" ] || [ -f "$models/silero_vad.onnx" ] || {
+    echo "whisper 를 쓰려면 화자분리 모델(다음단계.txt [6-2])이 있어야 합니다." >&2; exit 1; }
+fi
+
 echo "결과 폴더: $out"
-echo "[1/2] 받아 적기 (Kaldi)"
+echo "[1/3] 받아 적기 (Kaldi)"
 python3 local/transcribe_kaldi.py "$audio" --out "$out/transcript.json" \
   --nj "${KALDI_NJ:-4}" "${opts[@]}" ${KALDI_OPTS:-}
 
-echo "[2/2] 리포트 (voice-analyze)"
-python3 -m voice_ai.analyze "$out/transcript.json" \
+main=$out/transcript.json
+compare=()
+if [ "$engine" = dual ]; then
+  echo "[2/3] 받아 적기 (whisper turbo)"
+  wopts=(--vad "$models/silero_vad.onnx")
+  [ -f "$segmentation" ] && wopts=(--segmentation "$segmentation" --embedding "$embedding" --speakers "$speakers")
+  [ -n "${VOICE_MANAGER:-}" ] && [ -f "$segmentation" ] && wopts+=(--manager "$(realpath "$VOICE_MANAGER")")
+  python3 -m voice_ai.transcribe "$audio" --engine whisper \
+    --encoder "$whisper/turbo-encoder.int8.onnx" --decoder "$whisper/turbo-decoder.int8.onnx" \
+    --tokens "$whisper/turbo-tokens.txt" "${wopts[@]}" --threads "$(nproc)" --out "$out/whisper.json"
+  main=$out/whisper.json
+  compare=(--compare "$out/transcript.json")
+else
+  echo "[2/3] whisper 안 씀 (Kaldi 만)"
+fi
+
+echo "[3/3] 리포트 (voice-analyze)"
+python3 -m voice_ai.analyze "$main" "${compare[@]}" \
   --department "$department" --date "$consult_date" | tee "$out/report.txt"
-python3 -m voice_ai.analyze "$out/transcript.json" \
+python3 -m voice_ai.analyze "$main" "${compare[@]}" \
   --department "$department" --date "$consult_date" --json > "$out/report.json"
 
 echo
 echo "받아 적은 글 전체: $out/transcript.txt"
 echo "전체 대화를 화자와 함께 보려면:"
-echo "  PYTHONPATH=~/-AI/src python3 -m voice_ai.analyze \"$out/transcript.json\" --department $department --full"
+echo "  PYTHONPATH=~/-AI/src python3 -m voice_ai.analyze \"$main\" --department $department --full"

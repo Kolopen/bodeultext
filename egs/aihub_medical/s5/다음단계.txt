@@ -357,3 +357,59 @@ report.txt 는 이런 모양이다 (예시).
 
   KALDI_MODEL=/mnt/e/kaldi-model/tdnn1a_online KALDI_GRAPH=/mnt/e/kaldi-model/graph_big \
     local/report_audio.sh /mnt/e/녹음/0102.m4a 내과
+
+
+############################################################
+#  [11] whisper turbo 와 같이 쓰기 / 엔진 견주기
+############################################################
+
+지금 Kaldi 는 정해진 문장을 읽은 녹음으로만 배워서 실제 진료 대화는 많이 틀린다
+(내과 재진 1건에서 글자 오류율 약 60%). whisper turbo 는 대화에 강하지만 말을 지어내거나
+숫자를 틀릴 때가 있다. 두 엔진은 틀리는 방식이 달라서 같이 쓰면 엇갈리는 자리가
+곧 다시 들어 볼 자리가 된다.
+
+11-1. whisper turbo 받기 (E: 에, 약 1GB)
+
+  mkdir -p /mnt/e/voice-models && cd /mnt/e/voice-models
+  curl -L -O https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2
+  tar -xf sherpa-onnx-whisper-turbo.tar.bz2 && rm sherpa-onnx-whisper-turbo.tar.bz2
+  ls sherpa-onnx-whisper-turbo
+  cd ~/bodeultext/egs/aihub_medical/s5
+
+  -> turbo-encoder.int8.onnx, turbo-decoder.int8.onnx, turbo-tokens.txt 가 보이면 된다.
+  -> SenseVoice 도 견주려면 (선택):
+     cd /mnt/e/voice-models
+     curl -L -O https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+     tar -xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2 && rm sherpa-onnx-sense-voice-*.tar.bz2
+
+11-2. 엔진 견주기 (녹음 몇 개 + 클로바노트 정답)
+
+  녹음과 클로바노트에서 '텍스트로 내보내기' 한 파일을 같은 이름으로 나란히 둔다.
+    E:\녹음\0102.m4a   E:\녹음\0102.txt
+    E:\녹음\0103.m4a   E:\녹음\0103.txt
+    E:\녹음\0104.m4a   E:\녹음\0104.txt
+
+  local/eval_engines.sh /mnt/e/녹음/0102.m4a /mnt/e/녹음/0103.m4a /mnt/e/녹음/0104.m4a
+
+  끝에 이런 표가 나오고 E:\녹음\엔진비교.txt 에도 저장된다.
+
+    녹음   엔진     글자 오류율   숫자 맞음   없는 숫자
+    0102   kaldi        61.7%         2/9           1
+    0102   whisper      ...
+    합계   ...
+
+  글자 오류율   낮을수록 좋다 (띄어쓰기·문장부호는 빼고 견준다)
+  숫자 맞음     정답의 숫자 중 맞게 적은 수 (검사 수치에 중요)
+  없는 숫자     정답에 없는 숫자. 리포트에 가짜 수치로 오를 수 있다
+  -> 받아 적은 글(json)은 녹음 이름 폴더에 남는다. 다시 하려면 그 json 을 지운다.
+  -> whisper 는 CPU 로 돌아서 녹음 길이만큼쯤 걸릴 수 있다.
+
+11-3. 두 엔진으로 리포트 만들기
+
+  whisper turbo 를 받아 두면 local/report_audio.sh 가 알아서 두 엔진을 쓴다.
+  본문은 whisper, 비교는 Kaldi. 엇갈린 숫자·용어는 리포트에 따로 표시된다.
+
+    local/report_audio.sh /mnt/e/녹음/0102.m4a 내과 2026-10-13
+
+  -> Kaldi 만 쓰려면 앞에 REPORT_ENGINE=kaldi 를 붙인다.
+  -> 결과 폴더에 whisper.json(본문), transcript.json(Kaldi) 이 같이 생긴다.
