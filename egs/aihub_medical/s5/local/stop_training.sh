@@ -91,6 +91,8 @@ if [ "${1:-}" != "--yes" ]; then
   case "$answer" in y|Y|yes) ;; *) echo "그대로 둡니다."; exit 0 ;; esac
 fi
 
+whisper=$(ps -o args= -p "$(echo $all | tr ' ' ,)" | grep -c 'local/whisper/' || true)
+
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   all=$(targets)
   [ -z "$all" ] && break
@@ -109,6 +111,14 @@ if [ -n "$(targets)" ]; then
 fi
 
 echo "멈췄습니다."
+if [ "$whisper" -gt 0 ]; then
+  step=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["global_step"])' \
+    exp/whisper/lora/last/progress.json 2>/dev/null || true)
+  [ -n "$step" ] && echo "whisper 학습은 $step 걸음까지 저장돼 있습니다."
+  echo "whisper 학습을 이어서 하려면 (다음단계.txt [12-4]):"
+  echo "  nohup local/whisper/run.sh --stage 2 > whisper.log 2>&1 &"
+  exit 0
+fi
 echo "로그 끝을 보고 어느 단계였는지 확인한 뒤 다음단계.txt [3] 대로 이어서 하세요."
 latest=$(ls -t exp/chain/tdnn1a/[0-9]*.mdl 2>/dev/null | head -1)
 # final.mdl 이 더 새것이면 신경망 학습은 이미 끝난 것이다.

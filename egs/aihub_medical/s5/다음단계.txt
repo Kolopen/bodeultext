@@ -416,3 +416,90 @@ report.txt 는 이런 모양이다 (예시).
 
   -> Kaldi 만 쓰려면 앞에 REPORT_ENGINE=kaldi 를 붙인다.
   -> 결과 폴더에 whisper.json(본문), transcript.json(Kaldi) 이 같이 생긴다.
+
+
+############################################################
+#  [12] 한국어 whisper 견주기 / whisper 를 AI-Hub 로 더 학습하기
+############################################################
+
+[11] 의 녹음 3개 결과: kaldi 55.6%, whisper turbo 33.7%, 클로바 15.5% (대본 기준 글자 오류율).
+클로바 쪽으로 다가가려고 두 가지를 해 본다.
+  12-1~12-2  한국어로 이미 더 학습된 whisper(faster-whisper 형식)를 받아 견준다. 받기만 하면 된다.
+  12-3~12-5  whisper turbo 를 Kaldi 와 같은 AI-Hub 데이터(의사_1 + 환자_1)로 직접 더 학습한다.
+faster-whisper 모델은 /mnt/e/voice-models/fw-이름 에 두기만 하면 local/eval_engines.sh 가
+알아서 같이 재고, 표에 fw-이름 으로 나온다.
+
+12-1. faster-whisper 깔기 (-AI 가 쓰는 파이썬에)
+
+  pip3 install --break-system-packages -e ~/-AI[transcribe,faster]
+
+  -> python3 -c "import faster_whisper" 가 아무 말 없이 끝나면 된다.
+
+12-2. 한국어 whisper 받기 → 견주기 (E: 에, 약 3GB)
+
+  pip3 install --break-system-packages -U huggingface_hub
+  python3 -c "from huggingface_hub import snapshot_download as d; d('ghost613/faster-whisper-large-v3-turbo-korean', local_dir='/mnt/e/voice-models/fw-ghost613')"
+  ls /mnt/e/voice-models/fw-ghost613
+
+  -> model.bin, config.json, tokenizer.json 이 보이면 된다.
+
+  local/eval_engines.sh /mnt/e/녹음/0001.m4a /mnt/e/녹음/0002.m4a /mnt/e/녹음/0003.m4a
+
+  -> 이미 만든 kaldi.json, whisper.json 은 건너뛰고 fw-ghost613.json 만 새로 만든다.
+  -> 표의 fw-ghost613 줄을 whisper(원본 turbo), clova 줄과 견준다.
+  -> CPU 로 돌아서 녹음 길이만큼쯤 걸린다.
+  -> 다른 faster-whisper 모델도 같은 식으로 /mnt/e/voice-models/fw-이름 에 받으면 된다.
+     하나만 재려면: VOICE_FW="ghost613=/mnt/e/voice-models/fw-ghost613" local/eval_engines.sh ...
+
+12-3. whisper 를 AI-Hub 로 더 학습하기 - 준비 (한 번만, 10~20분)
+
+  Kaldi 학습이 만든 data/train(의사_1 + 환자_1), data/test 를 그대로 쓴다. 지우지 않았어야 한다.
+  모델 전체가 아니라 작은 덧붙임 층(LoRA)만 학습한다. 그래야 8GB GPU 에 들어가고, whisper 가
+  원래 잘하던 대화체 실력을 덜 잃는다.
+
+  sudo apt install -y python3-venv
+  nvidia-smi                                       # GPU 가 보이는지
+  local/whisper/run.sh --stop-stage 0
+
+  -> ~/whisper-env 에 PyTorch(약 3GB) 등을 깐다. 끝에 "GPU: NVIDIA ..." 가 나오면 된다.
+  -> "GPU 를 못 찾았습니다" 면 nvidia-smi 부터 확인한다(Windows 쪽 NVIDIA 드라이버).
+
+12-4. 학습 (몇 시간)
+
+  nohup local/whisper/run.sh --stage 1 > whisper.log 2>&1 &
+  tail -f whisper.log                              # Ctrl+C 는 보기만 멈춘다
+
+  1 단계  학습 목록: data/train 에서 발화 4만 개(약 18만 개 중), 평가 문장(data/test)에서
+          확인용 300 + 평가용 500 개를 고른다.
+  2 단계  학습. 이런 줄이 나온다.
+            걸음 120/2500  손실 0.412  학습률 6.0e-05  4.1초/걸음  남은 시간 2.7시간
+          1000 걸음마다 "평가: 글자 오류율 N%" 와 정답/결과 예시가 나온다. 이 값이 줄면 배우는 중이다.
+  3 단계  faster-whisper 형식으로 내보내기 -> /mnt/e/voice-models/fw-aihub (학습한 것)
+                                              /mnt/e/voice-models/fw-turbo (학습 전 원본, 견주기용)
+  4 단계  AI-Hub 평가 문장 500개로 fw-turbo / fw-aihub (/ fw-ghost613) 를 견준다.
+          결과는 exp/whisper/eval_test.txt
+
+  -> "CUDA out of memory" 가 나오면 묶음을 줄여 다시 한다(이어서 한다):
+       nohup local/whisper/run.sh --stage 2 --batch 4 --grad-accum 4 > whisper.log 2>&1 &
+  -> 더 많이 학습하려면 --max-utts 80000 처럼 늘린다(1 단계부터 다시. 시간도 그만큼 늘어난다).
+     처음에는 4만 개로 효과가 있는지부터 본다.
+
+  멈추기 / 이어 하기
+    local/stop_training.sh                           # 멈춘다 (200 걸음마다 저장해 둔다)
+    nohup local/whisper/run.sh --stage 2 > whisper.log 2>&1 &   # 저장한 곳부터 이어 간다
+    -> 컴퓨터를 꺼도 된다. 다시 켜면 위 명령으로 이어 한다.
+
+12-5. 실제 진료 녹음으로 견주기
+
+  local/eval_engines.sh /mnt/e/녹음/0001.m4a /mnt/e/녹음/0002.m4a /mnt/e/녹음/0003.m4a
+
+  -> 표에 fw-aihub(학습한 것), fw-turbo(원본) 줄이 더 생긴다. 둘의 차이가 학습 효과다.
+  -> AI-Hub 는 정해진 문장을 읽은 녹음이라 4 단계(평가 문장)에서는 크게 좋아지고, 실제 대화에서는
+     덜 좋아지거나 오히려 나빠질 수도 있다. 판단은 이 표(실제 녹음)로 한다.
+  -> 학습한 모델은 숫자를 한글로 적는다("백이십"). 표는 숫자를 바꿔서 견주므로 상관없다.
+
+12-6. 지우기
+
+  rm -rf ~/whisper-env exp/whisper                  # 학습 환경과 중간 파일 (약 5GB)
+  ~/.cache/huggingface 에 받은 원본 whisper(약 1.6GB)도 지워도 된다.
+  E:\voice-models\fw-* 는 견주기에 쓰므로 필요 없을 때 지운다.

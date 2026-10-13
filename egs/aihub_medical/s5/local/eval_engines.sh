@@ -21,11 +21,14 @@
 #   VOICE_WHISPER   whisper turbo     기본 /mnt/e/voice-models/sherpa-onnx-whisper-turbo
 #   VOICE_SENSE     SenseVoice (선택) 기본 /mnt/e/voice-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17
 #   VOICE_SPEAKERS  화자 수           기본 2
+#   VOICE_FW        faster-whisper 모델들 (한국어 파인튜닝 등). "이름=폴더" 를 띄어 쓴다.
+#                   기본: /mnt/e/voice-models/fw-* 폴더를 모두 (이름은 fw- 뒤)
+#                   결과는 fw-이름.json 으로 남는다. 다음단계.txt [12]
 
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  sed -n '5,25p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '5,28p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 
@@ -49,6 +52,18 @@ export PYTHONPATH="$HOME/-AI/src${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONIOENCODING=utf-8
 diar=(--segmentation "$segmentation" --embedding "$embedding" --speakers "$speakers")
 
+# faster-whisper 모델 목록: "이름=폴더 이름=폴더 ..."
+fw=${VOICE_FW:-}
+if [ -z "$fw" ]; then
+  for d in /mnt/e/voice-models/fw-*; do
+    [ -f "$d/model.bin" ] && fw="$fw ${d##*/fw-}=$d"
+  done
+fi
+if [ -n "$fw" ] && ! python3 -c "import faster_whisper" 2>/dev/null; then
+  echo "faster-whisper 가 없어 그 모델들은 건너뜁니다 (다음단계.txt [12-1])." >&2
+  fw=
+fi
+
 for audio in "${audios[@]}"; do
   out=${audio%.*}
   mkdir -p "$out"
@@ -65,6 +80,13 @@ for audio in "${audios[@]}"; do
       --tokens "$whisper/turbo-tokens.txt" "${diar[@]}" --threads "$threads" \
       --out "$out/whisper.json" | sed 's/^/    /'
   fi
+  for item in $fw; do
+    name=${item%%=*} dir=${item#*=}
+    [ -f "$out/fw-$name.json" ] && continue
+    echo "  [faster-whisper: $name]"
+    python3 -m voice_ai.transcribe "$audio" --engine faster-whisper --model "$dir" \
+      "${diar[@]}" --threads "$threads" --out "$out/fw-$name.json" | sed 's/^/    /'
+  done
   if [ -f "$sense/model.int8.onnx" ] && [ ! -f "$out/sense.json" ]; then
     echo "  [SenseVoice]"
     python3 -m voice_ai.transcribe "$audio" --engine sensevoice \

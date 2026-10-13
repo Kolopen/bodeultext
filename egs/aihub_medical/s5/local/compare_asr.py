@@ -12,6 +12,7 @@
   /mnt/e/녹음/0102/kaldi.json       Kaldi
   /mnt/e/녹음/0102/whisper.json     whisper turbo
   /mnt/e/녹음/0102/sense.json       SenseVoice (있으면)
+  /mnt/e/녹음/0102/fw-*.json        faster-whisper 모델들 (한국어 파인튜닝, 직접 학습한 것)
 
 재는 것
   글자 오류율   띄어쓰기·문장부호를 빼고 한글 글자만 견준다. 숫자는 한글로 읽어서
@@ -126,7 +127,9 @@ def main():
         print(f"{audio.stem}: 정답 = {ref_path.name}", file=sys.stderr)
         ref = full_text(ref_path, load)
         ref_chars, ref_nums = hangul(ref), numbers(ref)
-        hyps = [(e, audio.with_suffix("") / f"{e}.json") for e in ENGINES]
+        folder = audio.with_suffix("")
+        hyps = [(e, folder / f"{e}.json") for e in ENGINES]
+        hyps += [(p.stem, p) for p in sorted(folder.glob("fw-*.json"))]
         if ref_path == script:
             hyps.insert(0, ("clova", clova))
         for engine, hyp_path in hyps:
@@ -144,13 +147,13 @@ def main():
     if not rows:
         sys.exit("견줄 것이 없습니다. local/eval_engines.sh 를 먼저 돌리세요.")
 
-    print(f"{'녹음':<12}{'엔진':<9}{'글자 오류율':>10}{'숫자 맞음':>12}{'없는 숫자':>10}")
+    print(f"{'녹음':<12}{'엔진':<16}{'글자 오류율':>10}{'숫자 맞음':>12}{'없는 숫자':>10}")
     for name, engine, errors, n, hit, want, extra in rows:
-        print(f"{name:<12}{engine:<9}{100 * errors / max(n, 1):>9.1f}%{f'{hit}/{want}':>12}{extra:>10}")
+        print(f"{name:<12}{engine:<16}{100 * errors / max(n, 1):>9.1f}%{f'{hit}/{want}':>12}{extra:>10}")
     if len({r[0] for r in rows}) > 1:
-        print("-" * 53)
+        print("-" * 60)
         for engine, (errors, n, hit, want, extra) in total.items():
-            print(f"{'합계':<12}{engine:<9}{100 * errors / max(n, 1):>9.1f}%{f'{hit}/{want}':>12}{extra:>10}")
+            print(f"{'합계':<12}{engine:<16}{100 * errors / max(n, 1):>9.1f}%{f'{hit}/{want}':>12}{extra:>10}")
     print("\n글자 오류율·없는 숫자는 낮을수록, 숫자 맞음은 높을수록 좋다.")
 
 
