@@ -84,7 +84,10 @@ def hangul(text):
 
 
 def numbers(text):
-    return re.findall(r"\d+(?:\.\d+)?", text.replace(",", ""))
+    """숫자 목록. 대본처럼 숫자를 한글로 적은 글("이백십육")도 숫자로 바꿔서 센다."""
+    sys.path.insert(0, str(HERE))
+    from korean_itn import convert
+    return re.findall(r"\d+(?:\.\d+)?", convert(text.replace(",", "")))
 
 
 def edit_distance(a, b):
