@@ -480,7 +480,11 @@ ghost613(한국어로 학습된 whisper)이 리포트에서 나빴던 것과 같
   tail -f whisper.log                              # Ctrl+C 는 보기만 멈춘다
 
   1 단계  학습 목록. 라벨 113만 개를 읽느라 10~30분 걸린다. 끝에 이런 줄이 나온다.
-            exp/whisper/train.tsv: 발화 100000개, 95.0시간 -> 27000줄 (한 줄에 평균 3.7개를 이어 붙임)
+            exp/whisper/train.tsv: 발화 61000개, 58.0시간, 서로 다른 문장 6100개 -> 16000줄 ...
+              같은 문장은 10번까지만 써서 뺀 발화 120000개
+          이 데이터는 한 문장을 수십 명이 읽었다(의사_1 은 평균 45명). 다 쓰면 모델이 그 문장을
+          외워서 실제 진료에서 소리가 흐릴 때 외운 문장으로 채우기 쉬우므로, 문장마다 다른 목소리
+          10개까지만 쓴다(--max-per-sentence 로 바꾼다).
               수를 숫자로 바꾼 발화 N개. 예:
                 혈압이 백사십에 구십이에요.
                   -> 혈압이 140에 90이에요.
@@ -561,24 +565,31 @@ ghost613(한국어로 학습된 whisper)이 리포트에서 나빴던 것과 같
         "말씀하셨거든요" 같은 말투)은 AI-Hub 로는 못 배운다. 실제 진료 녹음을 정답과 함께
         모아야 배운다(12-6 의 1).
 
-  1) 받기: AI-Hub '141.의료진 및 환자 음성' -> 1.Training -> 원천데이터 의 남은 zip 을
-     E:\aihub-zip 에 받는다. 전부 약 205GB. 나눠 받는다면 0) 의 "세트를 받는 순서" 대로
-     받는다(HA = 간호사_1~4, HB = 의사_1~3, PA~PF = 환자_1~6).
+  1) 받기: AI-Hub '141.의료진 및 환자 음성' -> 1.Training -> 원천데이터 의 zip 을
+     E:\aihub-zip 에 받는다(HA = 간호사_1~4, HB = 의사_1~3, PA~PF = 환자_1~6).
+     리포트는 거의 의사 말에서 나오므로 의사_2·3 부터 받았다(약 36GB, 문장 3,340개가 새로 는다).
+     받은 파일 이름이 '미확인 340597.crdownload' 같아도 괜찮다. 끝까지 받았는지는 2) 가 확인한다.
   2) 풀기 (이미 꺼낸 파일은 건너뛴다. 라벨은 이미 있으므로 음성만 꺼낸다):
+       python3 local/unpack_aihub.py --list /mnt/e/aihub-zip/*      # 무엇이 들었는지만 본다
        python3 local/unpack_aihub.py /mnt/e/aihub-zip/* --auto /mnt/e/aihub
+     -> --list 에 "의료진_의사_2.zip ... -> train/audio" 처럼 나오면 된다.
+     -> "끝까지 다운로드되지 않았습니다" 가 나오면 그 파일을 다시 받는다.
      -> 필요한 공간은 지금 꺼내 둔 의사_1 + 환자_1(179시간)의 크기로 가늠한다.
           du -sh /mnt/e/aihub/train/audio
         남은 세트(약 940시간)는 그 5배쯤 든다. 다 꺼냈으면 zip 은 지운다.
   3) 데이터 폴더 만들기 (Kaldi 의 data/train 은 그대로 두고 새로 만든다. 1시간 안팎):
        python3 local/aihub.py prep --labels /mnt/e/aihub/train/labels \
          --audio /mnt/e/aihub/train/audio --out data/train_all
-  4) 학습 (결과는 fw-aihub-all 로 따로 나온다):
-       nohup local/whisper/run.sh --stage 1 --train-data data/train_all --max-utts 300000 \
-         --dir exp/whisper_all --name aihub-all > whisper_all.log 2>&1 &
-     -> 한 문장을 평균 28명이 읽었으므로 전부(113만) 안 써도 30만 개면 거의 모든 문장이 들어간다.
-        시간은 10만 개(fw-aihub)의 약 3배.
-     -> 평가 문장(data/test)과 같은 문장은 다른 사람이 읽은 것도 학습에서 뺀다. 빼지 않으면
+  4) 학습 (결과는 fw-aihub-doc 으로 따로 나온다):
+       nohup local/whisper/run.sh --stage 1 --train-data data/train_all \
+         --dir exp/whisper_doc --name aihub-doc > whisper_doc.log 2>&1 &
+     -> data/train_all 에는 받아 둔 것이 다 든다(의사_1~3 + 환자_1). 환자_1 도 같이 쓴다.
+        환자 말도 받아 적어야 하고(진료 내용, 화자 가르기), 빼면 환자 말을 더 못 알아듣게
+        될 수 있다. 의사만 쓰려면 --groups HB 를 붙인다.
+     -> 같은 문장은 10명까지만 쓴다(1 단계 설명 참고). 의사 문장 약 5,500개 + 환자_1 문장
+        약 4,000개 x 10 = 발화 9만 개쯤으로, 처음 계획(10만 개)과 시간이 비슷하다.
+     -> 평가에 쓰는 문장 800개와 같은 문장은 다른 사람이 읽은 것도 학습에서 뺀다. 빼지 않으면
         평가 문장을 외워서 맞혀 점수가 실제보다 좋게 나온다. 1 단계에 뺀 수가 나온다.
-  5) 견주기: local/eval_engines.sh 표에 fw-aihub-all 줄이 생긴다. fw-aihub(의사_1 + 환자_1)
-     와의 차이가 데이터를 늘린 효과다.
+  5) 견주기: local/eval_engines.sh 표에 fw-aihub-doc 줄이 생긴다. fw-turbo(학습 전)와의 차이가
+     학습 효과다. 더 받은 세트로 다시 학습할 때는 --dir 과 --name 을 바꿔 따로 남긴다.
 

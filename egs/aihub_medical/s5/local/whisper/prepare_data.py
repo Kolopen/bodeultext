@@ -22,6 +22,11 @@ whisper 는 늘 30초 단위로 들어서, 3초짜리 발화 하나만 주면 �
 받아 적도록 배운다(짧은 문장만 배우면 긴 구간에서 첫 문장만 쓰고 멈추기 쉽다).
 이을 길이는 줄마다 0 ~ pack-sec 초에서 고르게 뽑으므로 한 문장짜리 줄도 남는다.
 
+--max-per-sentence 는 같은 문장을 몇 번까지 쓸지다. 이 데이터는 한 문장을 수십 명이 읽어서
+(의사 세트는 평균 58명) 다 쓰면 모델이 그 문장들을 외워, 실제 진료에서 소리가 흐릴 때 외운
+문장으로 채워 넣기 쉽다. 문장마다 여러 목소리를 고르게 뽑고 나머지는 버린다.
+--groups 는 화자 구분(발화 ID 앞 두 글자)을 고른다. HB 는 의사, HA 는 간호사, PA~PF 는 환자.
+
 --holdout 으로 평가 문장(Kaldi text)을 주면 같은 문장(군말·띄어쓰기만 다른 것까지)을 다른
 사람이 읽은 발화도 학습에서 뺀다. 이 데이터는 한 문장을 여러 사람이 읽어서, 빼지 않으면
 평가 문장을 외워서 맞히게 된다. data/train 은 Kaldi 때 이미 평가 문장을 뺐지만, 세트를 더
@@ -31,6 +36,7 @@ whisper 는 늘 30초 단위로 들어서, 3초짜리 발화 하나만 주면 �
 """
 
 import argparse
+import collections
 import random
 import re
 import shlex
@@ -129,6 +135,9 @@ def main():
     p.add_argument("--pack-sec", type=float, default=0.0, help="이어 붙일 최대 길이(초). 0 이면 잇지 않는다")
     p.add_argument("--holdout", action="append", default=[],
                    help="이 Kaldi text(평가 문장)와 같은 문장은 학습에서 뺀다. 여러 번 줄 수 있다")
+    p.add_argument("--max-per-sentence", type=int, default=0,
+                   help="같은 문장은 이만큼까지만 쓴다(다른 목소리로 고르게). 0 이면 전부")
+    p.add_argument("--groups", help="이 화자 구분만 쓴다. 예: HB,PA (HB 의사, HA 간호사, PA~PF 환자)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
@@ -156,17 +165,22 @@ def main():
         raw = read_map(text_file)
         print("  --labels 가 없어 Kaldi 글(text.word)을 씁니다. 문장부호가 없습니다.", file=sys.stderr)
 
-    rows, changed, dropped, held_out = [], [], 0, 0
+    groups = set(args.groups.split(",")) if args.groups else None
+    rows, changed, dropped, held_out, other = [], [], 0, 0, 0
     for utt in sorted(wavs):
         if utt not in raw:
+            continue
+        if groups and utt[:2] not in groups:
+            other += 1
             continue
         dur = durs.get(utt, 0.0)
         text = whisper_text(raw[utt])
         if text is None or dur > args.max_sec:
             dropped += 1
             continue
-        # 견주기는 Kaldi 와 같은 꼴(수는 한글, 문장부호 없음)로 한다
-        if held and sentence_key(normalize(raw[utt])[0] or raw[utt]) in held:
+        # 같은 문장인지는 Kaldi 와 같은 꼴(수는 한글, 문장부호 없음)로 견준다
+        key = sentence_key(normalize(raw[utt])[0] or raw[utt])
+        if key in held:
             held_out += 1
             continue
         path = wav_path(wavs[utt])
@@ -174,26 +188,44 @@ def main():
             sys.exit(f"경로에 '{SEP}' 가 있으면 쓸 수 없습니다: {path}")
         if re.search(r"\d", text) and not re.search(r"\d", raw[utt]):
             changed.append((raw[utt], text))
-        rows.append((utt, spks.get(utt, utt.split("-", 1)[0]), path, dur, text))
+        rows.append((utt, spks.get(utt, utt.split("-", 1)[0]), path, dur, text, key))
     if not rows:
-        sys.exit(f"쓸 발화가 없습니다: {args.data}")
+        sys.exit(f"쓸 발화가 없습니다: {args.data}" + (f" (--groups {args.groups})" if groups else ""))
 
     rng = random.Random(args.seed)
+    same = collections.defaultdict(list)
+    for r in rows:
+        same[r[5]].append(r)
+    capped = 0
+    if args.max_per_sentence:
+        rows = []
+        for key in sorted(same):
+            readings = same[key]
+            if len(readings) > args.max_per_sentence:
+                capped += len(readings) - args.max_per_sentence
+                readings = rng.sample(readings, args.max_per_sentence)
+            rows.extend(readings)
+        rows.sort()
     if args.max_utts and len(rows) > args.max_utts:
         rows = sorted(rng.sample(rows, args.max_utts))
     rows.sort(key=lambda r: (r[1], r[0]))  # 화자별로, 그 안에서는 발화 순서대로
-    groups = pack(rows, args.pack_sec, rng) if args.pack_sec > 0 else [[r] for r in rows]
+    lines = pack(rows, args.pack_sec, rng) if args.pack_sec > 0 else [[r] for r in rows]
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
-        for g in groups:
+        for g in lines:
             name = g[0][0] + (f"+{len(g) - 1}" if len(g) > 1 else "")
             f.write("\t".join([name, SEP.join(r[2] for r in g), SEP.join(f"{r[3]:.2f}" for r in g),
                                SEP.join(r[4] for r in g)]) + "\n")
 
     hours = sum(r[3] for r in rows) / 3600
-    print(f"{args.out}: 발화 {len(rows)}개, {hours:.1f}시간 -> {len(groups)}줄"
-          + (f" (한 줄에 평균 {len(rows) / len(groups):.1f}개를 이어 붙임)" if args.pack_sec > 0 else ""))
+    print(f"{args.out}: 발화 {len(rows)}개, {hours:.1f}시간, 서로 다른 문장 {len({r[5] for r in rows})}개"
+          f" -> {len(lines)}줄"
+          + (f" (한 줄에 평균 {len(rows) / len(lines):.1f}개를 이어 붙임)" if args.pack_sec > 0 else ""))
+    if capped:
+        print(f"  같은 문장은 {args.max_per_sentence}번까지만 써서 뺀 발화 {capped}개")
+    if other:
+        print(f"  다른 화자 구분이라 뺀 발화 {other}개 (--groups {args.groups})")
     if dropped:
         print(f"  뺀 발화 {dropped}개 (비식별화 태그, {args.max_sec:.0f}초 넘음)")
     if held_out:
