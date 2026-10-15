@@ -467,9 +467,12 @@ ghost613(한국어로 학습된 whisper)이 리포트에서 나빴던 것과 같
   (/mnt/e/aihub 의 train/labels, valid/labels, 음성)를 그대로 쓴다. 지웠다면 다시 풀어야 한다.
   다른 곳에 두었으면 아래 명령마다 --data-root 폴더 를 붙인다.
 
-  sudo apt install -y python3-venv
+  sudo apt install -y python3-venv                 # Ubuntu 비밀번호를 묻는다(입력이 안 보여도 정상)
   nvidia-smi                                       # GPU 가 보이는지
   local/whisper/run.sh --stop-stage 0
+
+  -> 명령은 한 줄씩, 앞 명령이 끝나 $ 가 다시 나오면 넣는다. 여러 줄을 한꺼번에 붙여 넣으면
+     기다리는 동안 누른 키가 sudo 비밀번호 칸으로 들어가 실패할 수 있다.
 
   -> ~/whisper-env 에 PyTorch(약 3GB) 등을 깐다. 끝에 "GPU: NVIDIA ..." 가 나오면 된다.
   -> "GPU 를 못 찾았습니다" 면 nvidia-smi 부터 확인한다(Windows 쪽 NVIDIA 드라이버).
@@ -477,7 +480,7 @@ ghost613(한국어로 학습된 whisper)이 리포트에서 나빴던 것과 같
 12-4. 학습 (몇 시간)
 
   nohup local/whisper/run.sh --stage 1 > whisper.log 2>&1 &
-  tail -f whisper.log                              # Ctrl+C 는 보기만 멈춘다
+  tail -F whisper.log                              # Ctrl+C 는 보기만 멈춘다
 
   1 단계  학습 목록. 라벨 113만 개를 읽느라 10~30분 걸린다. 끝에 이런 줄이 나온다.
             exp/whisper/train.tsv: 발화 61000개, 58.0시간, 서로 다른 문장 6100개 -> 16000줄 ...

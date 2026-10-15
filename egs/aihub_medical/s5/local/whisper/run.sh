@@ -52,8 +52,11 @@ esac
 trained=$models/fw-$name
 
 if run 0; then
+  # python3-venv 없이 만들다 만 가상환경(pip 가 없다)은 지우고 다시 만든다
+  if [ -f "$env/pyvenv.cfg" ] && [ ! -x "$env/bin/pip" ]; then rm -rf "$env"; fi
   if [ ! -x "$py" ]; then
     python3 -m venv "$env" || {
+      [ -f "$env/pyvenv.cfg" ] && rm -rf "$env"
       echo "가상환경을 못 만들었습니다. 먼저: sudo apt install -y python3-venv" >&2; exit 1; }
   fi
   "$env/bin/pip" install -q --upgrade pip
@@ -67,6 +70,13 @@ assert torch.cuda.is_available(), 'GPU 를 못 찾았습니다 (nvidia-smi 확�
 print('GPU:', torch.cuda.get_device_name(0), '| PyTorch', torch.__version__)
 x = torch.randn(256, 256, device='cuda'); print('GPU 계산 확인:', float((x @ x).sum()) == float((x @ x).sum()))
 "
+fi
+
+# 1 단계부터는 0 단계에서 만든 학습 환경이 있어야 한다. 없으면 30분짜리 1 단계를 돌고 나서야
+# 2 단계에서 멈추므로 여기서 미리 본다.
+if [ "$stop_stage" -ge 1 ] && ! "$py" -c "import torch, transformers, peft" 2>/dev/null; then
+  echo "학습 환경(~/whisper-env)이 없거나 덜 깔렸습니다. 먼저: local/whisper/run.sh --stop-stage 0" >&2
+  exit 1
 fi
 
 if run 1; then
