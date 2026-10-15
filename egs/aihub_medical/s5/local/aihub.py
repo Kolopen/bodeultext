@@ -361,6 +361,8 @@ def cmd_coverage(args):
 
 
 def index_audio(root):
+    # E: 의 수십만 개를 훑는 동안 멈춘 것처럼 보이지 않게 한다.
+    print(f"음성 파일을 찾는 중입니다: {root}", file=sys.stderr, flush=True)
     found = {}
     dup = 0
     for dirpath, _, files in os.walk(root):
@@ -372,6 +374,9 @@ def index_audio(root):
                 dup += 1
                 continue
             found[key] = os.path.join(dirpath, name)
+            if len(found) % 100000 == 0:
+                print(f"  음성 {len(found)}개 찾는 중...", file=sys.stderr, flush=True)
+    print(f"  음성 {len(found)}개", file=sys.stderr, flush=True)
     if dup:
         print(f"같은 이름의 음성 {dup}개는 처음 것만 씁니다.", file=sys.stderr)
     return found
