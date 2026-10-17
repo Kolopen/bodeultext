@@ -60,8 +60,10 @@ if run 0; then
       echo "가상환경을 못 만들었습니다. 먼저: sudo apt install -y python3-venv" >&2; exit 1; }
   fi
   "$env/bin/pip" install -q --upgrade pip
-  # RTX 50 시리즈는 CUDA 12.8 용 PyTorch 가 필요하다.
-  "$env/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cu128
+  # RTX 50 시리즈는 CUDA 12.8 용 PyTorch 가 필요하다. 커서 진행 막대를 보인다(-q 를 안 붙인다).
+  echo "PyTorch(GPU 용, 약 3GB)를 받습니다. 인터넷 속도에 따라 5~20분 걸립니다."
+  "$env/bin/pip" install torch --index-url https://download.pytorch.org/whl/cu128
+  echo "나머지(transformers, peft, faster-whisper ...)를 받습니다."
   "$env/bin/pip" install -q "transformers>=4.45,<5" "peft>=0.13" accelerate soundfile scipy \
     ctranslate2 faster-whisper huggingface_hub
   "$py" -c "
