@@ -24,6 +24,8 @@
 #   VOICE_FW        faster-whisper 모델들 (한국어 파인튜닝 등). "이름=폴더" 를 띄어 쓴다.
 #                   기본: /mnt/e/voice-models/fw-* 폴더를 모두 (이름은 fw- 뒤)
 #                   결과는 fw-이름.json 으로 남는다. 다음단계.txt [12]
+#   VOICE_FW_OPTS   faster-whisper 로 받아 적을 때 -AI 에 더 줄 옵션. 예: "--max-chunk 30"
+#   VOICE_FW_TAG    그때 결과 이름 뒤에 붙일 말. 예: -long -> fw-이름-long.json (기존 것과 견준다)
 
 set -euo pipefail
 
@@ -54,6 +56,8 @@ diar=(--segmentation "$segmentation" --embedding "$embedding" --speakers "$speak
 
 # faster-whisper 모델 목록: "이름=폴더 이름=폴더 ..."
 fw=${VOICE_FW:-}
+fw_opts=${VOICE_FW_OPTS:-}
+fw_tag=${VOICE_FW_TAG:-}
 if [ -z "$fw" ]; then
   for d in /mnt/e/voice-models/fw-*; do
     [ -f "$d/model.bin" ] && fw="$fw ${d##*/fw-}=$d"
@@ -81,11 +85,11 @@ for audio in "${audios[@]}"; do
       --out "$out/whisper.json" | sed 's/^/    /'
   fi
   for item in $fw; do
-    name=${item%%=*} dir=${item#*=}
+    name=${item%%=*}$fw_tag dir=${item#*=}
     [ -f "$out/fw-$name.json" ] && continue
-    echo "  [faster-whisper: $name]"
+    echo "  [faster-whisper: $name${fw_opts:+ ($fw_opts)}]"
     python3 -m voice_ai.transcribe "$audio" --engine faster-whisper --model "$dir" \
-      "${diar[@]}" --threads "$threads" --out "$out/fw-$name.json" | sed 's/^/    /'
+      "${diar[@]}" --threads "$threads" $fw_opts --out "$out/fw-$name.json" | sed 's/^/    /'
   done
   if [ -f "$sense/model.int8.onnx" ] && [ ! -f "$out/sense.json" ]; then
     echo "  [SenseVoice]"
